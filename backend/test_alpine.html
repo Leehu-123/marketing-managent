@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+</head>
+<body>
+    <div x-data="{
+        slotGenerating: {},
+        getImageSlots() {
+            return [{index: 1, prompt: 'test', hasImage: false}];
+        },
+        async generateSlotImage(slot_index) {
+            console.log('CLICKED:', slot_index);
+            this.slotGenerating = { ...this.slotGenerating, [slot_index]: true };
+            await new Promise(r => setTimeout(r, 2000));
+            this.slotGenerating = { ...this.slotGenerating, [slot_index]: false };
+            console.log('DONE');
+        }
+    }">
+        <template x-for="slot in getImageSlots()" :key="slot.index">
+            <button type="button"
+                    @click.prevent="generateSlotImage(slot.index)"
+                    :disabled="slotGenerating[slot.index]">
+                <span x-text="slotGenerating[slot.index] ? 'Ðang t?o...' : '?? Generate ?nh'"></span>
+            </button>
+        </template>
+    </div>
+</body>
+</html>

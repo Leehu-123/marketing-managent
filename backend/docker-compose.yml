@@ -1,0 +1,14 @@
+version: '3.8'
+
+services:
+  web:
+    build: .
+    container_name: dafa_glass_backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./dafa_glass.db:/app/dafa_glass.db
+      - ./uploads:/app/uploads
+    environment:
+      - TZ=Asia/Ho_Chi_Minh

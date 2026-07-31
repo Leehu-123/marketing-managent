@@ -1,0 +1,470 @@
+{% extends "base.html" %}
+
+{% block head_extra %}
+<style>
+@media print {
+    #sidebar-nav, #top-header, #video-filters, #btn-export, #btn-approve, .mobile-menu-btn, #scripts-sidebar {
+        display: none !important;
+    }
+    .bg-\[\#0f111a\]\/80 { background: transparent !important; border: none !important; box-shadow: none !important; }
+    body, .content-wrapper, html { background: white !important; color: black !important; padding: 0 !important; margin: 0 !important; height: auto !important; overflow: visible !important; }
+    .h-\[calc\(100vh-60px\)\] { height: auto !important; overflow: visible !important; }
+    .overflow-auto, .overflow-hidden, .flex-1, .overflow-x-auto { overflow: visible !important; }
+    textarea, input, select { border: none !important; background: transparent !important; color: black !important; resize: none !important; -webkit-appearance: none; -moz-appearance: none; appearance: none; overflow: visible !important; }
+    textarea { height: auto !important; }
+    table { width: 100% !important; border-collapse: collapse !important; page-break-inside: auto; }
+    tr { page-break-inside: avoid; page-break-after: auto; }
+    th, td { border: 1px solid #ddd !important; color: black !important; padding: 8px !important; }
+    th { border-bottom: 2px solid #000 !important; }
+    .text-white, .text-gray-400, .text-gray-300, .text-fuchsia-300, .text-cyan-300, .text-yellow-300, .text-gray-200, .text-fuchsia-100, .text-cyan-200, .text-yellow-100 { color: black !important; }
+    .bg-fuchsia-900\/10, .bg-cyan-900\/10, .bg-yellow-900\/10, .bg-black\/20, .bg-white\/5, .bg-\[\#13151f\], .bg-\[\#0a0a0f\] { background: transparent !important; }
+    #add-scene-btn { display: none !important; }
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div x-data="videoScriptData()" class="p-4 sm:p-6 pb-32 space-y-6 flex flex-col h-[calc(100vh-60px)]">
+    <!-- Header -->
+    <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center shrink-0">
+        <div>
+            <h1 class="text-3xl font-black bg-clip-text text-transparent bg-gradient-to-r from-fuchsia-400 to-rose-500 uppercase tracking-tight">Kịch Bản Video</h1>
+            <p class="text-gray-400 mt-1 text-sm font-medium">Chi tiết phân cảnh, góc máy và lời thoại</p>
+        </div>
+        <button id="btn-export" @click="exportPdf()" class="mt-4 sm:mt-0 px-5 py-2.5 bg-white/5 hover:bg-white/10 text-white text-sm font-bold rounded-xl shadow-lg transition-all border border-white/10 flex items-center space-x-2">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+            <span>Xuất Kịch Bản PDF</span>
+        </button>
+    </div>
+
+    <!-- Toolbar Filters -->
+    <div id="video-filters" class="bg-gray-900/60 backdrop-blur-md border border-white/10 rounded-2xl p-4 shadow-xl shrink-0">
+        <div class="grid grid-cols-2 md:grid-cols-5 gap-4">
+            <div>
+                <label class="block text-[10px] font-bold text-gray-500 mb-1.5 uppercase tracking-widest">Nền tảng</label>
+                <select x-model="selectedPlatform" class="w-full bg-black/50 border border-white/5 rounded-lg px-3 py-2 text-sm text-white font-medium outline-none focus:ring-1 focus:ring-fuchsia-500 appearance-none">
+                    <template x-for="p in platforms" :key="p">
+                        <option :value="p" x-text="p" class="bg-gray-900"></option>
+                    </template>
+                </select>
+            </div>
+            <div>
+                <label class="block text-[10px] font-bold text-gray-500 mb-1.5 uppercase tracking-widest">Kênh</label>
+                <select x-model="selectedChannel" class="w-full bg-black/50 border border-white/5 rounded-lg px-3 py-2 text-sm text-white font-medium outline-none focus:ring-1 focus:ring-fuchsia-500 appearance-none">
+                    <option value="Tất cả" class="bg-gray-900">Tất cả</option>
+                    <template x-for="c in filteredChannels" :key="c.id">
+                        <option :value="c.id" x-text="c.name" class="bg-gray-900"></option>
+                    </template>
+                </select>
+            </div>
+            <div>
+                <label class="block text-[10px] font-bold text-gray-500 mb-1.5 uppercase tracking-widest">Chiến dịch</label>
+                <select x-model="selectedCampaign" class="w-full bg-black/50 border border-white/5 rounded-lg px-3 py-2 text-sm text-white font-medium outline-none focus:ring-1 focus:ring-fuchsia-500 appearance-none">
+                    <template x-for="camp in filteredCampaigns" :key="camp">
+                        <option :value="camp" x-text="camp" class="bg-gray-900"></option>
+                    </template>
+                </select>
+            </div>
+            <div>
+                <label class="block text-[10px] font-bold text-gray-500 mb-1.5 uppercase tracking-widest">Trạng thái</label>
+                <select x-model="filterStatus" class="w-full bg-black/50 border border-white/5 rounded-lg px-3 py-2 text-sm text-white font-medium outline-none focus:ring-1 focus:ring-fuchsia-500 appearance-none">
+                    <option value="Tất cả" class="bg-gray-900">Tất cả</option>
+                    <option value="Draft" class="bg-gray-900">Chờ duyệt</option>
+                    <option value="Approved" class="bg-gray-900">Đã duyệt</option>
+                </select>
+            </div>
+            <div>
+                <label class="block text-[10px] font-bold text-gray-500 mb-1.5 uppercase tracking-widest">Chọn Video</label>
+                <select x-model="selectedScriptId" @change="selectScriptById()" class="w-full bg-black/50 border border-white/5 rounded-lg px-3 py-2 text-sm text-white font-medium outline-none focus:ring-1 focus:ring-fuchsia-500 appearance-none">
+                    <template x-for="script in filteredScripts" :key="script.id">
+                        <option :value="script.id" x-text="getScriptTitle(script)" class="bg-gray-900"></option>
+                    </template>
+                </select>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Content Area: Sidebar (List) + Editor (Right) -->
+    <div class="flex flex-1 min-h-0 space-x-6">
+        
+        <!-- Sidebar: Video Scripts List -->
+        <div id="scripts-sidebar" class="w-80 bg-[#0f111a]/80 backdrop-blur-2xl border border-white/10 rounded-2xl shadow-2xl flex flex-col overflow-hidden shrink-0">
+            <div class="p-4 border-b border-white/10 bg-white/5">
+                <h2 class="text-sm font-bold text-white uppercase tracking-wider">Danh sách Kịch bản</h2>
+            </div>
+            <div class="flex-1 overflow-y-auto p-2 space-y-2">
+                <template x-for="script in filteredScripts" :key="script.id">
+                    <button @click="selectScript(script)" 
+                            class="w-full text-left p-3 rounded-xl border transition-all duration-200 group relative overflow-hidden"
+                            :class="selectedScriptId === script.id ? 'bg-fuchsia-500/10 border-fuchsia-500/50 shadow-[0_0_15px_rgba(217,70,239,0.1)]' : 'bg-transparent border-transparent hover:bg-white/5'">
+                        <div class="absolute left-0 top-0 bottom-0 w-1 bg-fuchsia-500 transition-transform"
+                             :class="selectedScriptId === script.id ? 'scale-y-100' : 'scale-y-0 group-hover:scale-y-50'"></div>
+                        <div class="pl-2">
+                            <h3 class="text-sm font-bold text-white mb-1 truncate" x-text="getScriptTitle(script)"></h3>
+                            <div class="flex items-center justify-between mt-2">
+                                <span class="text-[10px] font-bold px-2 py-0.5 rounded bg-black/50 text-gray-400" x-text="'ID: ' + script.id"></span>
+                                <span class="text-[10px] font-bold px-2 py-0.5 rounded border"
+                                      :class="script.status === 'Approved' ? 'bg-green-500/10 text-green-400 border-green-500/20' : 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20'"
+                                      x-text="script.status"></span>
+                            </div>
+                        </div>
+                    </button>
+                </template>
+                <template x-if="filteredScripts.length === 0">
+                    <div class="p-4 text-center text-gray-500 text-sm font-medium">Không có kịch bản nào</div>
+                </template>
+            </div>
+        </div>
+
+        <!-- Script Editor Detail -->
+        <div class="bg-[#0f111a]/80 backdrop-blur-2xl border border-white/10 rounded-2xl shadow-2xl overflow-hidden flex flex-col flex-1 min-h-0 relative">
+            <template x-if="!selectedScriptId">
+                <div class="absolute inset-0 flex flex-col items-center justify-center bg-black/40 backdrop-blur-sm z-10">
+                    <svg class="w-16 h-16 text-gray-600 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
+                    <p class="text-gray-400 text-lg font-medium">Vui lòng chọn một kịch bản từ danh sách</p>
+                </div>
+            </template>
+        
+        <!-- Script Info Header -->
+        <div class="p-5 border-b border-white/10 bg-white/5 flex justify-between items-start shrink-0">
+            <div>
+                <div class="flex items-center space-x-3 mb-1">
+                    <span class="px-2.5 py-1 bg-fuchsia-500/20 text-fuchsia-300 text-[10px] rounded border border-fuchsia-500/30 uppercase font-black tracking-widest" x-text="(currentPlan && currentPlan.target_platforms) ? JSON.parse(currentPlan.target_platforms)[0] : 'Đa nền tảng'">TikTok</span>
+                    <h2 class="text-xl font-bold text-white tracking-tight" x-text="currentPlan ? currentPlan.title : 'Chưa chọn kịch bản'"></h2>
+                </div>
+                <p class="text-gray-400 text-xs font-medium" x-text="'Tuyến nội dung: ' + (currentPlan ? currentPlan.content_line : '') + ' | Thời lượng: 45s'"></p>
+            </div>
+            <div class="flex space-x-3">
+                <button @click="deleteScript()" class="px-4 py-2.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 text-sm font-bold rounded-xl border border-red-500/30 transition-all flex items-center space-x-2">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                    <span>Xóa</span>
+                </button>
+                <button id="btn-approve" @click="approveScript()" :disabled="approving" class="px-6 py-2.5 bg-gradient-to-r from-fuchsia-600 to-rose-600 hover:from-fuchsia-500 hover:to-rose-500 disabled:opacity-50 text-white text-sm font-bold rounded-xl shadow-[0_0_15px_rgba(217,70,239,0.4)] transition-all flex items-center space-x-2 transform hover:scale-105 disabled:hover:scale-100">
+                    <svg x-show="!approving" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+                    <svg x-show="approving" class="animate-spin w-4 h-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                    <span x-text="approving ? 'Đang tạo Caption & Ảnh...' : 'Duyệt Kịch Bản'"></span>
+                </button>
+            </div>
+        </div>
+
+        <!-- 8-Column Script Table Container -->
+        <div class="flex-1 overflow-auto bg-[#0a0a0f]">
+            <table class="w-full text-sm text-left border-collapse min-w-[1400px]">
+                <thead class="sticky top-0 bg-[#13151f] z-20 shadow-lg">
+                    <tr class="border-b-2 border-white/10 text-gray-400 text-[11px] uppercase tracking-widest font-bold">
+                        <th class="p-4 w-12 text-center">TT</th>
+                        <th class="p-4 w-48 border-l border-white/5">Bối cảnh đề xuất</th>
+                        <th class="p-4 w-32 border-l border-white/5">Phần Video</th>
+                        <th class="p-4 w-60 border-l border-white/5">Nội dung khung hình</th>
+                        <th class="p-4 w-64 border-l border-white/5 text-fuchsia-300">Lời thoại (Voiceover)</th>
+                        <th class="p-4 w-40 border-l border-white/5 text-cyan-300">Âm thanh</th>
+                        <th class="p-4 w-48 border-l border-white/5 text-yellow-300">Text trên màn hình</th>
+                        <th class="p-4 w-32 border-l border-white/5">Hiệu ứng</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-white/5">
+                    <template x-for="(scene, index) in scenes" :key="index">
+                        <tr class="hover:bg-white/[0.02] transition-colors group align-top">
+                            <td class="p-4 text-center">
+                                <div class="w-6 h-6 mx-auto rounded-full bg-white/5 text-gray-400 flex items-center justify-center text-xs font-bold font-mono" x-text="index + 1"></div>
+                            </td>
+                            <td class="p-3 border-l border-white/5">
+                                <textarea x-model="scene.setting" class="w-full h-full min-h-[80px] bg-black/20 border border-transparent hover:border-white/10 focus:border-fuchsia-500/50 text-gray-300 resize-y outline-none p-3 rounded-xl transition-all text-sm leading-relaxed" placeholder="Góc máy, địa điểm..."></textarea>
+                            </td>
+                            <td class="p-3 border-l border-white/5">
+                                <select x-model="scene.frame_type" class="w-full bg-black/20 border border-transparent hover:border-white/10 focus:border-fuchsia-500/50 text-gray-300 outline-none p-3 rounded-xl appearance-none font-semibold text-sm">
+                                    <option class="bg-gray-900">Hook</option>
+                                    <option class="bg-gray-900">Body</option>
+                                    <option class="bg-gray-900">B-Roll</option>
+                                    <option class="bg-gray-900">CTA</option>
+                                </select>
+                            </td>
+                            <td class="p-3 border-l border-white/5">
+                                <textarea x-model="scene.visuals" class="w-full h-full min-h-[80px] bg-black/20 border border-transparent hover:border-white/10 focus:border-fuchsia-500/50 text-gray-200 resize-y outline-none p-3 rounded-xl transition-all text-sm leading-relaxed" placeholder="Mô tả hành động, hình ảnh..."></textarea>
+                            </td>
+                            <td class="p-3 border-l border-white/5">
+                                <textarea x-model="scene.voiceover" class="w-full h-full min-h-[80px] bg-fuchsia-900/10 border border-fuchsia-500/10 hover:border-fuchsia-500/30 focus:border-fuchsia-500 focus:bg-fuchsia-900/20 text-fuchsia-100 resize-y outline-none p-3 rounded-xl transition-all text-sm font-medium leading-relaxed" placeholder="Lời đọc..."></textarea>
+                            </td>
+                            <td class="p-3 border-l border-white/5">
+                                <textarea x-model="scene.audio" class="w-full h-full min-h-[80px] bg-cyan-900/10 border border-cyan-500/10 hover:border-cyan-500/30 focus:border-cyan-500 focus:bg-cyan-900/20 text-cyan-200 resize-y outline-none p-3 rounded-xl transition-all text-xs leading-relaxed" placeholder="SFX/Music..."></textarea>
+                            </td>
+                            <td class="p-3 border-l border-white/5">
+                                <textarea x-model="scene.on_screen_text" class="w-full h-full min-h-[80px] bg-yellow-900/10 border border-yellow-500/10 hover:border-yellow-500/30 focus:border-yellow-500 focus:bg-yellow-900/20 text-yellow-100 resize-y outline-none p-3 rounded-xl transition-all text-sm font-bold uppercase leading-relaxed" placeholder="Text nổi bật..."></textarea>
+                            </td>
+                            <td class="p-3 border-l border-white/5 relative">
+                                <textarea x-model="scene.transition" class="w-full h-full min-h-[80px] bg-black/20 border border-transparent hover:border-white/10 focus:border-fuchsia-500/50 text-gray-400 resize-y outline-none p-3 rounded-xl transition-all text-xs leading-relaxed" placeholder="Chuyển cảnh..."></textarea>
+                                
+                                <button @click="removeScene(index)" class="absolute top-4 right-4 w-6 h-6 bg-red-500/20 text-red-400 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 hover:bg-red-500 hover:text-white transition-all">
+                                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                                </button>
+                            </td>
+                        </tr>
+                    </template>
+                </tbody>
+            </table>
+        </div>
+        
+            <!-- Add Scene Button -->
+            <div id="add-scene-btn" class="p-3 bg-[#13151f] border-t border-white/10 shrink-0">
+                <button @click="addScene()" class="w-full py-3 bg-white/5 hover:bg-white/10 border border-white/10 border-dashed rounded-xl text-gray-400 hover:text-white text-sm font-bold transition-all flex justify-center items-center space-x-2">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path></svg>
+                    <span>Thêm Phân Cảnh (Scene)</span>
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function videoScriptData() {
+    return {
+        platforms: ['Tất cả', 'TikTok', 'YouTube', 'Facebook'],
+        selectedPlatform: 'Tất cả',
+        allChannels: [],
+        selectedChannel: 'Tất cả',
+        campaigns: ['Tất cả'],
+        rawCampaigns: [],
+        selectedCampaign: 'Tất cả',
+        campaignIdMap: {},
+        scripts: [],
+        plans: [],
+        scenes: [],
+        selectedScriptId: null,
+        filterStatus: 'Tất cả',
+        timeOptions: ['Tất cả', 'Hôm nay', 'Tuần này', 'Tháng này', '30 ngày qua'],
+        selectedTime: 'Tất cả',
+        approving: false,
+        get filteredChannels() {
+            if(this.selectedPlatform === 'Tất cả') return this.allChannels;
+            return this.allChannels.filter(c => c.platform && c.platform.toLowerCase() === this.selectedPlatform.toLowerCase());
+        },
+        get filteredCampaigns() {
+            if (!this.selectedChannel || this.selectedChannel === 'Tất cả') return this.campaigns;
+            const validNames = this.rawCampaigns.filter(c => !c.channel_id || c.channel_id == this.selectedChannel).map(c => c.name);
+            return ['Tất cả', ...validNames];
+        },
+        init() {
+            this.$watch('selectedPlatform', () => {
+                this.selectedChannel = 'Tất cả';
+            });
+            this.loadChannels();
+            this.loadCampaigns();
+            this.loadData();
+        },
+        async loadChannels() {
+            try {
+                const res = await fetch('/api/v1/video-channels/', {
+                    headers: { "Authorization": "Bearer " + localStorage.getItem("token") }
+                });
+                if(res.ok) {
+                    this.allChannels = await res.json();
+                }
+            } catch(e) { console.error(e); }
+        },
+        async loadCampaigns() {
+            try {
+                const res = await fetch('/api/v1/campaigns/?type=Video', {
+                    headers: { "Authorization": "Bearer " + localStorage.getItem("token") }
+                });
+                if (res.ok) {
+                    const data = await res.json();
+                    this.rawCampaigns = data;
+                    this.campaigns = ['Tất cả', ...data.map(c => c.name)];
+                    data.forEach(c => this.campaignIdMap[c.name] = c.id);
+                } else {
+                    this.campaigns = ['Tất cả'];
+                }
+            } catch (err) {
+                console.error(err);
+                this.campaigns = ['Tất cả'];
+            }
+        },
+        async loadData() {
+            try {
+                // Fetch plans
+                const resPlans = await fetch('/api/v1/video-plans/', {
+                    headers: { "Authorization": "Bearer " + localStorage.getItem("token") }
+                });
+                if(resPlans.ok) this.plans = await resPlans.json();
+                
+                // Fetch scripts
+                const resScripts = await fetch('/api/v1/video-scripts/', {
+                    headers: { "Authorization": "Bearer " + localStorage.getItem("token") }
+                });
+                if(resScripts.ok) {
+                    this.scripts = await resScripts.json();
+                    if(this.scripts.length > 0) {
+                        this.selectScript(this.scripts[0]);
+                    }
+                }
+            } catch (err) { console.error(err); }
+        },
+        get filteredScripts() {
+            return this.scripts.filter(s => {
+                const plan = this.plans.find(p => p.id === s.video_plan_id);
+                if(!plan) return false;
+                
+                // Platform filter
+                if (this.selectedPlatform !== 'Tất cả') {
+                    try {
+                        const plats = JSON.parse(plan.target_platforms || '[]');
+                        if (!plats.some(p => p.toLowerCase() === this.selectedPlatform.toLowerCase())) return false;
+                    } catch(e) { return false; }
+                }
+                
+                // Channel filter
+                if(this.selectedChannel !== 'Tất cả' && plan.channel_id != this.selectedChannel) return false;
+                
+                // Campaign filter
+                if (this.selectedCampaign !== 'Tất cả') {
+                    const campId = this.campaignIdMap[this.selectedCampaign];
+                    if (campId && plan.campaign_id != campId) return false;
+                }
+                
+                // Status filter
+                if (this.filterStatus !== 'Tất cả') {
+                    if (this.filterStatus === 'Draft' && s.status !== 'Draft') return false;
+                    if (this.filterStatus === 'Approved' && s.status !== 'Approved') return false;
+                }
+                
+                return true;
+            });
+        },
+        getScriptTitle(script) {
+            const plan = this.plans.find(p => p.id === script.video_plan_id);
+            return plan ? plan.title : 'Kịch bản #' + script.id;
+        },
+        selectScript(script) {
+            this.selectedScriptId = script.id;
+            this.scenes = script.scenes || [];
+        },
+        selectScriptById() {
+            if(!this.selectedScriptId) return;
+            const script = this.scripts.find(s => s.id == this.selectedScriptId);
+            if (script) {
+                this.selectScript(script);
+            }
+        },
+        get currentPlan() {
+            if(!this.selectedScriptId) return null;
+            const script = this.scripts.find(s => s.id === this.selectedScriptId);
+            if(!script) return null;
+            return this.plans.find(p => p.id === script.video_plan_id) || null;
+        },
+        addScene() {
+            this.scenes.push({
+                setting: '', frame_type: 'Body', visuals: '', voiceover: '', audio: '', on_screen_text: '', transition: ''
+            });
+            // Scroll to bottom (simple timeout trick)
+            setTimeout(() => {
+                const container = document.querySelector('.flex-1.overflow-auto');
+                if(container) container.scrollTop = container.scrollHeight;
+            }, 100);
+        },
+        async deleteScript() {
+            if(!this.selectedScriptId) return;
+            if(!confirm("Bạn có chắc chắn muốn xóa kịch bản này?")) return;
+            try {
+                const res = await fetch('/api/v1/video-scripts/' + this.selectedScriptId, {
+                    method: 'DELETE',
+                    headers: { "Authorization": "Bearer " + localStorage.getItem("token") }
+                });
+                if (res.ok) {
+                    window.showToast?.('Đã xóa kịch bản', 'success');
+                    this.selectedScriptId = null;
+                    await this.loadData();
+                }
+            } catch(e) {}
+        },
+        async approveScript() {
+            if(!this.selectedScriptId) return;
+            this.approving = true;
+            try {
+                // Prepare scenes payload
+                const scenesPayload = this.scenes.map((s, index) => ({
+                    scene_order: index + 1,
+                    setting: s.setting,
+                    frame_type: s.frame_type,
+                    visuals: s.visuals,
+                    voiceover: s.voiceover,
+                    audio: s.audio,
+                    on_screen_text: s.on_screen_text,
+                    transition: s.transition
+                }));
+                
+                // Cập nhật kịch bản
+                const res = await fetch(`/api/v1/video-scripts/${this.selectedScriptId}`, {
+                    method: 'PUT',
+                    headers: { 
+                        "Content-Type": "application/json",
+                        "Authorization": "Bearer " + localStorage.getItem("token") 
+                    },
+                    body: JSON.stringify({
+                        status: 'Approved'
+                    })
+                });
+                
+                if(res.ok) {
+                    window.showToast?.('Đã duyệt kịch bản thành công!', 'success');
+                    await this.loadData();
+                    this.selectScriptById();
+                }
+            } catch(e) {
+                console.error(e);
+            } finally {
+                this.approving = false;
+            }
+        },
+        async exportPdf() {
+            if(!this.selectedScriptId) return;
+            window.showToast?.('Đang chuẩn bị PDF...', 'info');
+            const printWin = window.open('', '_blank');
+            let html = `
+            <html><head><title>Kịch Bản #${this.selectedScriptId}</title>
+            <style>
+                body { font-family: Arial, sans-serif; padding: 20px; color: #333; line-height: 1.5; }
+                table { width: 100%; border-collapse: collapse; margin-top: 20px; font-size: 14px; }
+                th, td { border: 1px solid #ccc; padding: 10px; text-align: left; vertical-align: top; }
+                th { background-color: #f5f5f5; }
+                .title { font-size: 24px; font-weight: bold; margin-bottom: 5px; }
+                .subtitle { font-size: 14px; color: #666; margin-bottom: 20px; }
+            </style></head><body>
+            <div class="title">Kịch bản: ${this.currentPlan ? this.currentPlan.title : 'Chưa có tên'}</div>
+            <div class="subtitle">ID: ${this.selectedScriptId}</div>
+            <table>
+                <tr>
+                    <th width="5%">TT</th>
+                    <th width="15%">Bối cảnh</th>
+                    <th width="10%">Phần Video</th>
+                    <th width="20%">Visuals</th>
+                    <th width="25%">Voiceover</th>
+                    <th width="10%">Audio</th>
+                    <th width="15%">Text màn hình</th>
+                </tr>
+            `;
+            this.scenes.forEach((s, i) => {
+                html += `<tr>
+                    <td>${i+1}</td>
+                    <td>${(s.setting||'').replace(/\\n/g, '<br>')}</td>
+                    <td>${s.frame_type||''}</td>
+                    <td>${(s.visuals||'').replace(/\\n/g, '<br>')}</td>
+                    <td>${(s.voiceover||'').replace(/\\n/g, '<br>')}</td>
+                    <td>${(s.audio||'').replace(/\\n/g, '<br>')}</td>
+                    <td>${(s.on_screen_text||'').replace(/\\n/g, '<br>')}</td>
+                </tr>`;
+            });
+            html += `</table></body></html>`;
+            printWin.document.write(html);
+            printWin.document.close();
+            printWin.focus();
+            setTimeout(() => { printWin.print(); printWin.close(); }, 500);
+        },
+        removeScene(index) {
+            if(confirm('Xóa phân cảnh này?')) {
+                this.scenes.splice(index, 1);
+            }
+        }
+    }
+}
+</script>
+{% endblock %}

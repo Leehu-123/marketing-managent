@@ -1,0 +1,1352 @@
+{% extends 'base.html' %}
+{% block active_nav %}production{% endblock %}
+{% block page_title %}Biên tập & Sản xuất Nội dung{% endblock %}
+
+{% block content %}
+<script>
+function productionPage() {
+    return {
+    loading: true,
+    campaigns: [],
+    posts: [],
+    plansMap: {},
+    selectedPostId: null,
+    selectedPost: null,
+    editorTab: 'edit', // 'edit' or 'preview'
+    searchQuery: '',
+    filterCampaignId: '',
+    filterStatus: 'Pending Review',
+    filterPlatform: '',
+    filterTime: '', // changed from '30' to '' to show all
+    saving: false,
+    approving: false,
+    uploading: false,
+    aiGeneratingImage: false,
+    aiImagePrompt: '',
+    showPromptEditor: false,
+    inlineUploading: false,
+    deleting: false,
+    reverting: false,
+    slotGenerating: {},
+    restoredImageSlots: [],
+    slotPromptTranslations: {},
+    
+    // Character counters warnings
+    metaTitleLimit: 60,
+    metaDescLimit: 160,
+
+    async init() {
+        await this.loadData();
+    },
+
+    async loadData() {
+        this.loading = true;
+        try {
+            // 1. Tải chiến dịch
+            const campRes = await fetch('/api/v1/campaigns/');
+            const campaigns = await campRes.json();
+            this.campaigns = campaigns.filter(c => c.campaign_type !== 'Video');
+            
+            // 2. Tải tất cả kế hoạch của các chiến dịch song song
+            const plansPromises = this.campaigns.map(c => fetch(`/api/v1/campaigns/${c.id}/plans`).then(r => r.json()));
+            const plansList = await Promise.all(plansPromises);
+            
+            // 3. Xây dựng bản đồ plans Map để tra cứu platform & format nhanh
+            this.plansMap = {};
+            plansList.forEach(plans => {
+                plans.forEach(p => {
+                    this.plansMap[p.id] = p;
+                });
+            });
+            
+            // 4. Tải danh sách tất cả các bài viết
+            const postsRes = await fetch('/api/v1/posts/');
+            const postsData = await postsRes.json();
+            
+            // 5. Kết hợp thông tin post với plan tương ứng
+            this.posts = postsData.map(post => {
+                const plan = this.plansMap[post.content_plan_id];
+                return {
+                    ...post,
+                    platform: plan ? plan.platform : 'Web',
+                    format: plan ? plan.format : 'Long article',
+                    campaign_id: plan ? plan.campaign_id : null,
+                    scheduled_at: plan ? plan.scheduled_at : null
+                };
+            });
+            
+            // Tự động chọn bài viết đầu tiên
+            if (this.posts.length > 0) {
+                // Check xem url có param id ko
+                const urlParams = new URLSearchParams(window.location.search);
+                const postIdParam = urlParams.get('id');
+                if (postIdParam) {
+                    this.selectPost(parseInt(postIdParam));
+                } else {
+                    this.selectPost(this.posts[0].id);
+                }
+            }
+        } catch (err) {
+            console.error('Load production data error:', err);
+            window.showToast('Không thể tải dữ liệu bài viết', 'error');
+        } finally {
+            this.loading = false;
+        }
+    },
+
+    normalizeBodyHtml(body) {
+        return (body || '').replace(/\\x3C/g, '<').replace(/\\x3E/g, '>');
+    },
+
+    async selectPost(id) {
+        this.selectedPostId = id;
+        this.selectedPost = null;
+        try {
+            const res = await fetch(`/api/v1/posts/${id}`);
+            if (!res.ok) throw new Error('API Error');
+            const postDetails = await res.json();
+            postDetails.body = this.normalizeBodyHtml(postDetails.body);
+            this.restoredImageSlots = [];
+            this.slotPromptTranslations = {};
+            
+            // Đính kèm platform và format
+            const plan = this.plansMap[postDetails.content_plan_id];
+            this.selectedPost = {
+                ...postDetails,
+                platform: plan ? plan.platform : 'Web',
+                format: plan ? plan.format : 'Long article',
+                campaign_id: plan ? plan.campaign_id : null,
+                scheduled_at: plan ? plan.scheduled_at : null
+            };
+        } catch (err) {
+            console.error('Select post error:', err);
+            window.showToast('Không thể tải chi tiết bài viết', 'error');
+        }
+    },
+
+    async savePost(silent) {
+        if (!this.selectedPost) return;
+        this.selectedPost.body = this.normalizeBodyHtml(this.selectedPost.body);
+        this.saving = true;
+        try {
+            const res = await fetch(`/api/v1/posts/${this.selectedPost.id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    title: this.selectedPost.title,
+                    body: this.selectedPost.body,
+                    meta_title: this.selectedPost.meta_title,
+                    meta_description: this.selectedPost.meta_description,
+                    image_prompt: this.selectedPost.image_prompt,
+                    headline: this.selectedPost.headline,
+                    subheadline: this.selectedPost.subheadline,
+                    cta: this.selectedPost.cta,
+                    utm_source: this.selectedPost.utm_source,
+                    media_urls: this.selectedPost.media_urls,
+                    fb_post_type: this.selectedPost.fb_post_type
+                })
+            });
+            if (!res.ok) throw new Error('API Error');
+            const updated = await res.json();
+            this.selectedPost.media_url = updated.media_url;
+            if (!silent) window.showToast('Đã lưu bài viết thành công', 'success');
+            
+            // Cập nhật scheduled_at nếu có thay đổi
+            if (this.selectedPost._newScheduledAt) {
+                const plan = this.plansMap[this.selectedPost.content_plan_id];
+                if (plan) {
+                    await fetch(`/api/v1/plans/${plan.id}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ scheduled_at: this.selectedPost._newScheduledAt })
+                    });
+                    this.selectedPost.scheduled_at = this.selectedPost._newScheduledAt;
+                    plan.scheduled_at = this.selectedPost._newScheduledAt;
+                }
+            }
+            
+            this.posts = this.posts.map(p => p.id === this.selectedPost.id ? { ...p, title: this.selectedPost.title, status: this.selectedPost.status, scheduled_at: this.selectedPost.scheduled_at } : p);
+        } catch (err) {
+            console.error('Save post error:', err);
+            if (!silent) window.showToast('Không thể lưu bài viết', 'error');
+        } finally {
+            this.saving = false;
+        }
+    },
+
+    async approvePost() {
+        if (!this.selectedPost) return;
+        if (!confirm('Bạn có chắc duyệt bài viết này để đưa vào hàng đợi tự động xuất bản theo lịch đăng?')) return;
+        
+        this.approving = true;
+        try {
+            const res = await fetch(`/api/v1/posts/${this.selectedPost.id}/approve`, {
+                method: 'POST'
+            });
+            if (!res.ok) throw new Error('API Error');
+            const data = await res.json();
+            
+            this.selectedPost.status = 'Approved';
+            window.showToast('Đã duyệt bài viết! Bài viết sẽ tự động xuất bản đúng giờ.', 'success');
+            
+            // Cập nhật list local
+            this.posts = this.posts.map(p => p.id === this.selectedPost.id ? { ...p, status: 'Approved' } : p);
+        } catch (err) {
+            console.error('Approve post error:', err);
+            window.showToast('Không thể duyệt bài viết', 'error');
+        } finally {
+            this.approving = false;
+        }
+    },
+
+    async uploadMedia(event) {
+        const files = event.target.files;
+        if (!files || files.length === 0) return;
+        
+        const validExtensions = ['.mp4', '.png', '.jpg', '.jpeg', '.webp'];
+        const formData = new FormData();
+        
+        for (let i = 0; i < files.length; i++) {
+            const file = files[i];
+            const fileExt = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
+            if (!validExtensions.includes(fileExt)) {
+                window.showToast(`File ${file.name} không hỗ trợ!`, 'warning');
+                continue;
+            }
+            formData.append('files', file);
+        }
+
+        if (!formData.has('files')) return;
+        
+        this.uploading = true;
+        try {
+            const res = await fetch(`/api/v1/posts/${this.selectedPost.id}/upload-media`, {
+                method: 'POST',
+                body: formData
+            });
+            if (!res.ok) {
+                const err = await res.json();
+                throw new Error(err.detail || 'Upload thất bại');
+            }
+            const updated = await res.json();
+            this.selectedPost.media_url = updated.media_url;
+            this.selectedPost.media_urls = updated.media_urls;
+            window.showToast('Tải lên media thành công!', 'success');
+            
+            // Cập nhật list local
+            this.posts = this.posts.map(p => p.id === this.selectedPost.id ? { ...p, media_url: updated.media_url, media_urls: updated.media_urls } : p);
+        } catch (err) {
+            console.error('Upload media error:', err);
+            window.showToast(err.message || 'Không thể upload file', 'error');
+        } finally {
+            this.uploading = false;
+            event.target.value = ''; // Reset input
+        }
+    },
+    
+    async removeMedia(index) {
+        if (!this.selectedPost.media_urls) return;
+        try {
+            let urls = JSON.parse(this.selectedPost.media_urls);
+            urls.splice(index, 1);
+            this.selectedPost.media_urls = JSON.stringify(urls);
+            if (urls.length > 0) {
+                this.selectedPost.media_url = urls[0];
+            } else {
+                this.selectedPost.media_url = '';
+            }
+            // Tự động lưu ngay để DB đồng bộ
+            await this.savePost(true);
+            window.showToast('Đã xóa ảnh', 'success');
+        } catch (e) {
+            console.error('Lỗi khi xóa ảnh:', e);
+            this.selectedPost.media_url = '';
+            this.selectedPost.media_urls = '[]';
+        }
+    },
+
+    async revertPost() {
+        if (!this.selectedPost) return;
+        if (!confirm('Chuyển bài viết về trạng thái Chờ duyệt để chỉnh sửa lại?')) return;
+        this.reverting = true;
+        try {
+            const res = await fetch(`/api/v1/posts/${this.selectedPost.id}/revert`, { method: 'POST' });
+            if (!res.ok) throw new Error('API Error');
+            this.selectedPost.status = 'Pending Review';
+            this.posts = this.posts.map(p => p.id === this.selectedPost.id ? { ...p, status: 'Pending Review' } : p);
+            window.showToast('Đã chuyển bài về trạng thái chỉnh sửa', 'success');
+        } catch (err) {
+            console.error('Revert error:', err);
+            window.showToast('Không thể chuyển trạng thái', 'error');
+        } finally {
+            this.reverting = false;
+        }
+    },
+
+    async deletePost(postId) {
+        if (!confirm('Bạn có chắc muốn xóa bài viết này? Hành động không thể hoàn tác!')) return;
+        this.deleting = true;
+        try {
+            const res = await fetch(`/api/v1/posts/${postId}`, { method: 'DELETE' });
+            if (!res.ok) throw new Error('API Error');
+            this.posts = this.posts.filter(p => p.id !== postId);
+            if (this.selectedPostId === postId) {
+                this.selectedPost = null;
+                this.selectedPostId = null;
+                if (this.posts.length > 0) this.selectPost(this.posts[0].id);
+            }
+            window.showToast('Đã xóa bài viết', 'success');
+        } catch (err) {
+            console.error('Delete post error:', err);
+            window.showToast('Không thể xóa bài viết', 'error');
+        } finally {
+            this.deleting = false;
+        }
+    },
+
+    getImageSlots() {
+        if (!this.selectedPost) return [];
+        const slotsMap = new Map();
+        const body = this.normalizeBodyHtml(this.selectedPost.body || '');
+        const slotRegex = new RegExp('\x3C!--\\s*IMAGE_SLOT_(\\d+)\\s*--\x3E', 'g');
+        let match;
+        while ((match = slotRegex.exec(body)) !== null) {
+            const idx = parseInt(match[1]);
+            const promptRegex = new RegExp('\x3C!--\\s*IMAGE_SLOT_PROMPT_' + idx + ':\\s*([\\s\\S]*?)\\s*--\x3E');
+            const promptMatch = promptRegex.exec(body);
+            const defaultCaption = promptMatch ? promptMatch[1].trim() : '';
+            const cacheKey = idx + '|' + defaultCaption;
+            const defaultPrompt = this.slotPromptTranslations[cacheKey] || this.buildEnglishImagePrompt(defaultCaption);
+            slotsMap.set(idx, { index: idx, prompt: defaultPrompt, caption: defaultCaption, cacheKey: cacheKey, hasImage: false });
+        }
+        (this.restoredImageSlots || []).forEach(slot => {
+            if (slot && slot.index && !slotsMap.has(slot.index)) {
+                slotsMap.set(slot.index, { index: slot.index, prompt: slot.prompt || '', caption: slot.caption || '', cacheKey: slot.index + '|' + (slot.caption || ''), hasImage: false });
+            }
+        });
+        return Array.from(slotsMap.values()).sort((a, b) => a.index - b.index);
+    },
+
+    async generateSlotImage(slot_index) {
+        console.log('CLICKED GENERATE SLOT:', slot_index);
+        const txt = document.getElementById('slot-prompt-' + slot_index);
+        const cap = document.getElementById('slot-caption-' + slot_index);
+        const promptText = txt ? txt.value : '';
+        const captionText = cap ? cap.value : '';
+
+        this.slotGenerating = { ...this.slotGenerating, [slot_index]: true };
+        try {
+            const res = await fetch(`/api/v1/posts/${this.selectedPost.id}/generate-slot-image`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ slot_index: slot_index, prompt: promptText, caption: captionText })
+            });
+            if (!res.ok) {
+                const err = await res.json();
+                throw new Error(err.detail || 'Tạo ảnh thất bại');
+            }
+            const data = await res.json();
+
+            // Tự thay thế placeholder trong frontend
+            if (data.url) {
+                const placeholderRegex = new RegExp('\x3C!--\\s*IMAGE_SLOT_' + slot_index + '\\s*--\x3E', 'g');
+                const prompt_placeholder_regex = new RegExp('\x3C!--\\s*IMAGE_SLOT_PROMPT_' + slot_index + ':[\\s\\S]*?--\x3E', 'g');
+                
+                const displayCaption = captionText || data.caption || promptText;
+                const safePrompt = this.escapeAttr((promptText || '').substring(0, 240));
+                const safeAlt = this.escapeAttr(displayCaption.substring(0, 80));
+                const safeFig = this.escapeHtml(displayCaption.substring(0, 140));
+                const safeCaptionAttr = this.escapeAttr(displayCaption.substring(0, 140));
+                const img_tag = '\x3Cfigure class=\'inline-img-wrapper\' data-slot=\'' + slot_index + '\' data-prompt=\'' + safePrompt + '\' data-caption=\'' + safeCaptionAttr + '\'\x3E' +
+                    '\x3Cimg src=\'' + data.url + '\' alt=\'' + safeAlt + '\' class=\'inline-img\'\x3E' +
+                    '\x3Cfigcaption\x3E' + safeFig + '\x3C/figcaption\x3E\x3C/figure\x3E';
+                
+                let newBody = this.selectedPost.body.replace(placeholderRegex, img_tag);
+                newBody = newBody.replace(prompt_placeholder_regex, ''); // Xóa prompt instruction
+                
+                this.selectedPost.body = newBody;
+                this.restoredImageSlots = (this.restoredImageSlots || []).filter(slot => slot.index !== slot_index);
+                
+                // Nhanh chóng cập nhật TinyMCE nếu nó đang mở
+                if (window.tinymce && tinymce.activeEditor) {
+                    tinymce.activeEditor.setContent(newBody);
+                }
+            }
+            
+            await this.savePost(true);
+            window.showToast(`Đã tạo ảnh cho vị trí #${slot_index}`, 'success');
+        } catch (err) {
+            console.error('Slot image error:', err);
+            window.showToast(err.message || 'Không thể tạo ảnh', 'error');
+        } finally {
+            this.slotGenerating = { ...this.slotGenerating, [slot_index]: false };
+        }
+    },
+    
+    getParsedMediaUrls() {
+        if (!this.selectedPost || !this.selectedPost.media_urls) return [];
+        try {
+            const urls = JSON.parse(this.selectedPost.media_urls);
+            return Array.isArray(urls) ? urls : [];
+        } catch (e) {
+            return this.selectedPost.media_url ? [this.selectedPost.media_url] : [];
+        }
+    },
+
+    getInlineImages() {
+        if (!this.selectedPost || !this.selectedPost.body) return [];
+        const images = [];
+        const regex = new RegExp('\x3Cfigure[^>]*class=[\'\\"]([^\'\\"]*\\s)?inline-img-wrapper(\\s[^\'\\"]*)?[\'\\"][\\s\\S]*?\x3Cimg[^>]*src=[\'\\"]([^\'\\"]+)[\'\\"][^>]*>[\\s\\S]*?(?:\x3Cfigcaption[^>]*>([\\s\\S]*?)\x3C/figcaption>)?[\\s\\S]*?\x3C/figure>', 'gi');
+        let match;
+        while ((match = regex.exec(this.selectedPost.body)) !== null) {
+            const html = match[0];
+            images.push({
+                html,
+                url: match[3],
+                caption: (match[4] || '').replace(/<[^>]+>/g, '').trim(),
+                slot: parseInt(this.getAttrFromHtml(html, 'data-slot') || '0', 10) || null,
+                prompt: this.getAttrFromHtml(html, 'data-prompt'),
+                savedCaption: this.getAttrFromHtml(html, 'data-caption')
+            });
+        }
+        return images;
+    },
+
+    async removeInlineImage(index) {
+        const images = this.getInlineImages();
+        const img = images[index];
+        if (!img || !confirm('Xóa ảnh minh họa này khỏi nội dung bài?')) return;
+        const slot = img.slot || (index + 1);
+        const caption = img.savedCaption || img.caption || '';
+        const prompt = img.prompt || this.buildEnglishImagePrompt(caption);
+        const escapedPrompt = caption ? '\n' + '\x3C!-- IMAGE_SLOT_PROMPT_' + slot + ': ' + caption + ' --\x3E' : '';
+        const restoredSlot = '\x3C!-- IMAGE_SLOT_' + slot + ' --\x3E' + escapedPrompt;
+        this.selectedPost.body = this.normalizeBodyHtml(this.selectedPost.body).replace(img.html, restoredSlot);
+        this.restoredImageSlots = [
+            ...(this.restoredImageSlots || []).filter(s => s.index !== slot),
+            { index: slot, prompt: prompt, caption: caption }
+        ];
+        if (window.tinymce && tinymce.activeEditor) {
+            tinymce.activeEditor.setContent(this.selectedPost.body);
+        }
+        await this.savePost(true);
+        await this.$nextTick();
+        window.showToast('Đã xóa ảnh inline khỏi bài viết. Ô prompt tạo lại ảnh đã được mở lại.', 'success');
+    },
+
+    getAttrFromHtml(html, attr) {
+        const m = (html || '').match(new RegExp(attr + "=['\\\"]([^'\\\"]+)['\\\"]", 'i'));
+        return m ? this.decodeHtmlEntities(m[1]) : '';
+    },
+
+    escapeAttr(text) {
+        return (text || '').replace(/&/g, '&amp;').replace(/'/g, '&#39;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    },
+
+    escapeHtml(text) {
+        return (text || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    },
+
+    decodeHtmlEntities(text) {
+        const textarea = document.createElement('textarea');
+        textarea.innerHTML = text || '';
+        return textarea.value;
+    },
+
+    buildEnglishImagePrompt(vietnameseCaption) {
+        const caption = (vietnameseCaption || '').trim();
+        if (!caption) return '';
+        return 'Photorealistic professional image for a Vietnamese glass/construction article. Main subject based on the Vietnamese caption: ' + caption + '. Realistic architecture/interior/product photography, natural light, premium DAFA Glass mood, sharp details. No text, no letters, no logo, no watermark, no collage.';
+    },
+
+    async ensureEnglishSlotPrompt(slot) {
+        if (!slot || !slot.caption || !slot.cacheKey) return;
+        if (this.slotPromptTranslations[slot.cacheKey]) return;
+        try {
+            const res = await fetch('/api/v1/image-gen/translate-slot-prompt', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ caption: slot.caption, title: this.selectedPost ? this.selectedPost.title : '' })
+            });
+            if (!res.ok) return;
+            const data = await res.json();
+            if (data.prompt) {
+                this.slotPromptTranslations = { ...this.slotPromptTranslations, [slot.cacheKey]: data.prompt };
+                await this.$nextTick();
+                const txt = document.getElementById('slot-prompt-' + slot.index);
+                if (txt && (!txt.value || txt.value === slot.prompt)) txt.value = data.prompt;
+            }
+        } catch (err) {
+            console.warn('Translate slot prompt failed:', err);
+        }
+    },
+
+    openInlineImage(url) {
+        if (!url) return;
+        window.open(url, '_blank', 'noopener');
+    },
+    
+    async previewImagePrompt() {
+        if (!this.selectedPost) return;
+        this.showPromptEditor = true;
+        this.aiImagePrompt = 'Đang tạo prompt...';
+        try {
+            const res = await fetch('/api/v1/image-gen/preview-prompt', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    title: this.selectedPost.title,
+                    body: this.selectedPost.body || '',
+                    platform: this.selectedPost.platform
+                })
+            });
+            if (!res.ok) throw new Error('API Error');
+            const data = await res.json();
+            this.aiImagePrompt = data.prompt;
+        } catch (err) {
+            console.error('Preview prompt error:', err);
+            this.aiImagePrompt = this.selectedPost.image_prompt || 'Không thể tạo prompt';
+        }
+    },
+
+    async aiGenerateImageFromButton() {
+        if (!this.showPromptEditor) await this.previewImagePrompt();
+        await this.aiGenerateImage();
+    },
+
+    async aiGenerateImage() {
+        if (!this.selectedPost) return;
+        this.aiGeneratingImage = true;
+        try {
+            const body = this.aiImagePrompt ? { custom_prompt: this.aiImagePrompt } : {};
+            body.headline = this.selectedPost.headline || '';
+            body.subheadline = this.selectedPost.subheadline || '';
+            body.cta = this.selectedPost.cta || '';
+            
+            const res = await fetch(`/api/v1/image-gen/posts/${this.selectedPost.id}/generate`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+            if (!res.ok) {
+                const err = await res.json();
+                throw new Error(err.detail || 'Tạo ảnh thất bại');
+            }
+            const data = await res.json();
+            
+            // Reload post data to get updated media_urls
+            await this.selectPost(this.selectedPost.id);
+            this.showPromptEditor = false;
+            window.showToast('AI đã tạo ảnh thành công!', 'success');
+        } catch (err) {
+            console.error('AI generate image error:', err);
+            window.showToast(err.message || 'Không thể tạo ảnh AI', 'error');
+        } finally {
+            this.aiGeneratingImage = false;
+        }
+    },
+
+    async uploadInlineImage(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+        
+        const validExts = ['.png', '.jpg', '.jpeg', '.webp', '.gif'];
+        const ext = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
+        if (!validExts.includes(ext)) {
+            window.showToast('Chỉ hỗ trợ .png, .jpg, .jpeg, .webp, .gif', 'warning');
+            return;
+        }
+        
+        const formData = new FormData();
+        formData.append('file', file);
+        
+        this.inlineUploading = true;
+        try {
+            const res = await fetch(`/api/v1/posts/${this.selectedPost.id}/upload-inline-image`, {
+                method: 'POST',
+                body: formData
+            });
+            if (!res.ok) throw new Error('Upload thất bại');
+            const data = await res.json();
+            
+            // Insert img tag at the end of body
+            const safeTitle = (this.selectedPost.title || '').replace(/'/g, '');
+            const imgTag = '\n\x3Cfigure class=\'inline-img-wrapper\'\x3E\x3Cimg src=\'' + data.url + '\' alt=\'' + safeTitle + '\' class=\'inline-img\'\x3E\x3Cfigcaption\x3EMinh họa\x3C/figcaption\x3E\x3C/figure\x3E\n';
+            this.selectedPost.body = (this.selectedPost.body || '') + imgTag;
+            window.showToast('Đã chèn ảnh minh họa vào nội dung!', 'success');
+        } catch (err) {
+            console.error('Inline image upload error:', err);
+            window.showToast('Không thể upload ảnh', 'error');
+        } finally {
+            this.inlineUploading = false;
+            event.target.value = '';
+        }
+    },
+
+    getFilteredPosts() {
+        const now = new Date();
+        return this.posts.filter(p => {
+            const matchesSearch = (p.title || '').toLowerCase().includes(this.searchQuery.toLowerCase());
+            const matchesCampaign = this.filterCampaignId ? p.campaign_id == this.filterCampaignId : true;
+            const matchesStatus = this.filterStatus ? p.status === this.filterStatus : true;
+            const matchesPlatform = this.filterPlatform ? p.platform === this.filterPlatform : true;
+            
+            let matchesTime = true;
+            if (this.filterTime && p.scheduled_at) {
+                const postDate = new Date(p.scheduled_at);
+                const diffTime = Math.abs(now - postDate);
+                const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+                if (this.filterTime === '7') matchesTime = diffDays <= 7;
+                else if (this.filterTime === '30') matchesTime = diffDays <= 30;
+                else if (this.filterTime === '90') matchesTime = diffDays <= 90;
+            }
+
+            return matchesSearch && matchesCampaign && matchesStatus && matchesPlatform && matchesTime;
+        });
+    },
+
+    getStatusClass(status) {
+        switch(status) {
+            case 'Pending Review': return 'bg-amber-500/10 text-amber-400 border border-amber-500/20';
+            case 'Approved': return 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20';
+            case 'Published': return 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20';
+            case 'Failed': return 'bg-red-500/10 text-red-400 border border-red-500/20';
+            default: return 'bg-slate-500/10 text-slate-400 border border-slate-500/20';
+        }
+    },
+    
+    getStatusLabel(status) {
+        switch(status) {
+            case 'Pending Review': return 'Chờ duyệt';
+            case 'Approved': return 'Đã duyệt';
+            case 'Published': return 'Đã đăng';
+            case 'Failed': return 'Thất bại';
+            default: return status;
+        }
+    },
+
+    formatDateTime(isoStr) {
+        if (!isoStr) return '';
+        const d = new Date(isoStr);
+        const hours = String(d.getHours()).padStart(2, '0');
+        const mins = String(d.getMinutes()).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const year = d.getFullYear();
+        return `${hours}:${mins} ${day}/${month}/${year}`;
+    },
+
+    formatHeadings(headings) {
+        if (!headings) return '<p class=\'text-sm text-slate-500\'>Chưa có cấu trúc headings.</p>';
+        try {
+            const obj = JSON.parse(headings);
+            let html = '';
+            if (obj.H1) html += `<div class='text-white font-bold mb-2 p-2 rounded bg-white/[0.02] border border-white/[0.04]'><span class='text-xs text-teal-400 font-mono mr-2'>H1</span>${obj.H1}</div>`;
+            if (obj.H2 && Array.isArray(obj.H2)) {
+                obj.H2.forEach(h2 => {
+                    html += `<div class='text-slate-300 ml-4 mb-1.5 p-1.5 rounded bg-white/[0.01] border border-white/[0.02]'><span class='text-xs text-purple-400 font-mono mr-2'>H2</span>${h2}</div>`;
+                });
+            }
+            if (obj.H3 && Array.isArray(obj.H3)) {
+                obj.H3.forEach(h3 => {
+                    html += `<div class='text-slate-400 ml-8 mb-1'><span class='text-xs text-cyan-400 font-mono mr-2'>H3</span>${h3}</div>`;
+                });
+            }
+            return html || headings;
+        } catch (e) {
+            return `<div class='text-slate-300 whitespace-pre-wrap'>${headings}</div>`;
+        }
+    }
+}
+}
+</script>
+<div x-data="productionPage()" class="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start relative min-h-[calc(100vh-140px)]">
+
+    <!-- ============================================================ -->
+    <!-- LEFT PANEL: POSTS SIDEBAR (4 cols)                          -->
+    <!-- ============================================================ -->
+    <div class="lg:col-span-4 glass-card h-full flex flex-col max-h-[80vh] overflow-hidden">
+        
+        <!-- Filters & Search -->
+        <div class="mb-4 space-y-3">
+            <div>
+                <label class="form-label text-xs" for="search-input">Tìm kiếm bài viết</label>
+                <div class="relative">
+                    <input type="text" id="search-input" class="form-input pl-9 text-sm py-1.5" placeholder="Nhập tiêu đề..." x-model="searchQuery">
+                    <div class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500">
+                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                        </svg>
+                    </div>
+                </div>
+            </div>
+            <div class="grid grid-cols-2 gap-2">
+                <div>
+                    <label class="text-[10px] text-slate-500 uppercase tracking-wider mb-1 block">Chiến dịch</label>
+                    <select class="form-input text-xs py-1.5 px-2 bg-slate-800/50" x-model="filterCampaignId">
+                        <option value="">Tất cả chiến dịch</option>
+                        <template x-for="c in campaigns" :key="c.id">
+                            <option :value="c.id" x-text="c.name"></option>
+                        </template>
+                    </select>
+                </div>
+                <div>
+                    <label class="text-[10px] text-slate-500 uppercase tracking-wider mb-1 block">Nền tảng</label>
+                    <select class="form-input text-xs py-1.5 px-2 bg-slate-800/50" x-model="filterPlatform">
+                        <option value="">Tất cả kênh</option>
+                        <option value="Web">Website</option>
+                        <option value="Fanpage">Fanpage</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="text-[10px] text-slate-500 uppercase tracking-wider mb-1 block">Trạng thái</label>
+                    <select class="form-input text-xs py-1.5 px-2 bg-slate-800/50" x-model="filterStatus">
+                        <option value="">Tất cả trạng thái</option>
+                        <option value="Pending Review">Chờ duyệt</option>
+                        <option value="Approved">Đã duyệt</option>
+                        <option value="Published">Đã đăng</option>
+                        <option value="Failed">Thất bại</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="text-[10px] text-slate-500 uppercase tracking-wider mb-1 block">Thời gian</label>
+                    <select class="form-input text-xs py-1.5 px-2 bg-slate-800/50" x-model="filterTime">
+                        <option value="">Tất cả thời gian</option>
+                        <option value="7">Trong 7 ngày</option>
+                        <option value="30">Trong 30 ngày</option>
+                        <option value="90">Trong 90 ngày</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+
+        <!-- Scrollable list of filtered posts -->
+        <div class="flex-1 overflow-y-auto space-y-2 pr-2">
+            
+            <template x-if="getFilteredPosts().length === 0">
+                <div class="text-center py-10">
+                    <p class="text-sm text-slate-500">Không tìm thấy bài viết nào.</p>
+                </div>
+            </template>
+
+            <template x-for="p in getFilteredPosts()" :key="p.id">
+                <div class="p-3 rounded-lg border cursor-pointer transition-all duration-200 relative group/item"
+                     :class="selectedPostId === p.id ? 'bg-teal-400/10 border-teal-400/40' : 'bg-white/[0.01] border-white/[0.04] hover:bg-white/[0.05]'">
+                    <div @click="selectPost(p.id)">
+                        <p class="text-xs font-medium truncate mb-2 pr-6" :class="selectedPostId === p.id ? 'text-teal-300 font-semibold' : 'text-slate-300'" x-text="p.title"></p>
+                        <div class="flex items-center justify-between">
+                            <span class="text-[10px] text-slate-500" x-text="formatDateTime(p.scheduled_at)"></span>
+                            <div class="flex gap-1">
+                                <span class="badge text-[9px] px-1.5 py-0.5" :class="getStatusClass(p.status)" x-text="getStatusLabel(p.status)"></span>
+                                <span class="badge text-[9px] px-1.5 py-0.5" 
+                                      :class="p.platform === 'Web' ? 'bg-teal-500/10 text-teal-400 border border-teal-500/20' : 'bg-purple-500/10 text-purple-400 border border-purple-500/20'"
+                                      x-text="p.platform"></span>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- Nút xóa bài viết -->
+                    <button @click.stop="deletePost(p.id)" 
+                            class="absolute top-2 right-2 opacity-0 group-hover/item:opacity-100 p-1 rounded-md bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-all"
+                            title="Xóa bài viết">
+                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0"/></svg>
+                    </button>
+                </div>
+            </template>
+            
+        </div>
+    </div>
+
+    <!-- ============================================================ -->
+    <!-- RIGHT PANEL: CONTENT EDITOR & PREVIEW (8 cols)              -->
+    <!-- ============================================================ -->
+    <div class="lg:col-span-8 space-y-6">
+        
+        <!-- Empty state editor -->
+        <template x-if="!selectedPost">
+            <div class="glass-card flex flex-col items-center justify-center py-40">
+                <div class="w-20 h-20 rounded-2xl bg-white/[0.02] border border-white/[0.06] flex items-center justify-center text-3xl mb-4 text-slate-600">📝</div>
+                <h3 class="text-slate-400 font-medium font-heading">Chưa chọn bài viết</h3>
+                <p class="text-slate-500 text-sm mt-1">Chọn một bài viết ở cột bên trái để bắt đầu chỉnh sửa và duyệt nội dung.</p>
+            </div>
+        </template>
+
+        <!-- Editor Box -->
+        <template x-if="selectedPost">
+            <div class="glass-card space-y-6">
+                
+                <!-- Header editor -->
+                <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-4 border-b border-white/[0.06]">
+                    <div>
+                        <div class="flex items-center gap-3">
+                            <span class="badge" 
+                                  :class="selectedPost.platform === 'Web' ? 'bg-teal-500/10 text-teal-400 border border-teal-500/20' : 'bg-purple-500/10 text-purple-400 border border-purple-500/20'"
+                                  x-text="selectedPost.platform === 'Web' ? '🌐 SEO Article' : '📱 Fanpage Post'"></span>
+                            <span class="badge text-[9px] px-1.5 py-0.5" :class="getStatusClass(selectedPost.status)" x-text="getStatusLabel(selectedPost.status)"></span>
+                        </div>
+                        <h3 class="text-lg font-heading font-semibold text-white mt-1" x-text="selectedPost.title"></h3>
+                        <!-- Lịch đăng bài (editable) -->
+                        <div class="flex items-center gap-2 mt-2">
+                            <span class="text-xs text-slate-500">Lịch đăng:</span>
+                            <input type="datetime-local" 
+                                   class="form-input text-xs bg-white/5 border border-white/10 text-white rounded px-2 py-1"
+                                   :value="selectedPost.scheduled_at ? new Date(selectedPost.scheduled_at).toISOString().slice(0,16) : ''"
+                                   @change="selectedPost._newScheduledAt = $event.target.value">
+                        </div>
+                    </div>
+
+                    <!-- Toggle tabs (Biên tập / Xem trước) -->
+                    <div class="flex bg-white/[0.03] border border-white/[0.06] p-1 rounded-lg">
+                        <button class="px-4 py-1.5 text-xs font-semibold rounded-md transition-all duration-200"
+                                :class="editorTab === 'edit' ? 'bg-teal-500 text-slate-950 font-bold' : 'text-slate-400 hover:text-white'"
+                                @click="editorTab = 'edit'">
+                            Biên tập
+                        </button>
+                        <button class="px-4 py-1.5 text-xs font-semibold rounded-md transition-all duration-200"
+                                :class="editorTab === 'preview' ? 'bg-teal-500 text-slate-950 font-bold' : 'text-slate-400 hover:text-white'"
+                                @click="editorTab = 'preview'">
+                            Xem trước
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Status Banner -->
+                <div class="p-3.5 rounded-lg border flex items-center justify-between text-xs"
+                     :class="{
+                         'bg-amber-400/5 border-amber-400/20 text-amber-300': selectedPost.status === 'Pending Review',
+                         'bg-emerald-400/5 border-emerald-400/20 text-emerald-300': selectedPost.status === 'Approved',
+                         'bg-cyan-400/5 border-cyan-400/20 text-cyan-300': selectedPost.status === 'Published',
+                         'bg-red-400/5 border-red-400/20 text-red-300': selectedPost.status === 'Failed'
+                     }">
+                    <div class="flex items-center gap-2">
+                        <span class="w-2.5 h-2.5 rounded-full animate-pulse"
+                              :class="{
+                                  'bg-amber-400': selectedPost.status === 'Pending Review',
+                                  'bg-emerald-400': selectedPost.status === 'Approved',
+                                  'bg-cyan-400': selectedPost.status === 'Published',
+                                  'bg-red-400': selectedPost.status === 'Failed'
+                              }"></span>
+                        <span x-text="
+                            selectedPost.status === 'Pending Review' ? 'Trạng thái: Đang biên tập & chờ duyệt.' :
+                            selectedPost.status === 'Approved' ? 'Trạng thái: Đã duyệt bài viết. Đang xếp hàng đăng bài tự động.' :
+                            selectedPost.status === 'Published' ? 'Trạng thái: Đã đăng bài thành công.' :
+                            'Trạng thái: Đăng bài thất bại. Vui lòng kiểm tra lại log.'
+                        "></span>
+                    </div>
+
+                    <!-- Hiển thị URL nếu đã publish -->
+                    <template x-if="selectedPost.status === 'Published' && selectedPost.published_url">
+                        <a :href="selectedPost.published_url" target="_blank" class="underline hover:text-cyan-200 font-semibold flex items-center gap-1">
+                            Xem bài viết thực tế
+                            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+                            </svg>
+                        </a>
+                    </template>
+                </div>
+
+                <!-- TAB: EDIT (Biên tập) -->
+                <div x-show="editorTab === 'edit'" class="space-y-6">
+                    
+                    <!-- Tiêu đề bài viết -->
+                    <div class="form-group">
+                        <label class="form-label" for="post-title">Tiêu đề bài đăng</label>
+                        <input type="text" id="post-title" class="form-input text-base" x-model="selectedPost.title">
+                    </div>
+
+                    <!-- NỀN TẢNG: WEB (SEO) -->
+                    <template x-if="selectedPost.platform === 'Web'">
+                        <div class="space-y-6">
+                            <!-- Meta Title & Counter -->
+                            <div class="form-group">
+                                <div class="flex justify-between items-center mb-1">
+                                    <label class="form-label" for="meta-title">Meta Title</label>
+                                    <span class="char-counter text-[10px]"
+                                          :class="selectedPost.meta_title?.length > metaTitleLimit ? 'danger text-red-500 font-bold' : selectedPost.meta_title?.length > 50 ? 'warning text-amber-500 font-semibold' : ''"
+                                          x-text="`${selectedPost.meta_title?.length || 0}/${metaTitleLimit}`"></span>
+                                </div>
+                                <input type="text" id="meta-title" class="form-input" placeholder="Nhập meta title..." x-model="selectedPost.meta_title">
+                            </div>
+
+                            <!-- Meta Description & Counter -->
+                            <div class="form-group">
+                                <div class="flex justify-between items-center mb-1">
+                                    <label class="form-label" for="meta-desc">Meta Description</label>
+                                    <span class="char-counter text-[10px]"
+                                          :class="selectedPost.meta_description?.length > metaDescLimit ? 'danger text-red-500 font-bold' : selectedPost.meta_description?.length > 140 ? 'warning text-amber-500 font-semibold' : ''"
+                                          x-text="`${selectedPost.meta_description?.length || 0}/${metaDescLimit}`"></span>
+                                </div>
+                                <textarea id="meta-desc" class="form-input min-h-[60px]" placeholder="Nhập mô tả chuẩn SEO..." x-model="selectedPost.meta_description"></textarea>
+                            </div>
+
+                            <!-- Headings Structure Display -->
+                            <div class="p-4 rounded-lg bg-white/[0.02] border border-white/[0.04]">
+                                <h4 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-1.5">
+                                    <svg class="w-4 h-4 text-teal-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+                                        <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25H12" />
+                                    </svg>
+                                    Cấu trúc Headings đề xuất (SEO)
+                                </h4>
+                                <div class="space-y-1.5" x-html="formatHeadings(selectedPost.headings_structure)"></div>
+                            </div>
+                        </div>
+                    </template>
+
+                    <!-- NỀN TẢNG: COMMON (CẢ WEB VÀ FANPAGE) -->
+                    <div class="space-y-6 mt-6">
+                        
+                        <!-- CHỌN ĐỊNH DẠNG FANPAGE -->
+                        <template x-if="selectedPost.platform === 'Fanpage'">
+                            <div class="form-group border-b border-white/[0.06] pb-6">
+                                <label class="form-label" for="fb-post-type">Định dạng hiển thị Facebook</label>
+                                <select id="fb-post-type" class="form-input w-full md:w-1/2" x-model="selectedPost.fb_post_type">
+                                    <option value="post">Bài đăng thường (Post)</option>
+                                    <option value="story">Tin (Story) dọc</option>
+                                    <option value="reel">Thước phim (Reel) dọc</option>
+                                </select>
+                                <p class="text-[11px] text-slate-500 mt-1">Định dạng này sẽ quyết định cách ảnh/video được hiển thị và cắt kích thước.</p>
+                            </div>
+                        </template>
+
+                        <!-- Image Prompt Box -->
+                        <div class="p-4 rounded-lg bg-indigo-500/5 border border-indigo-500/10">
+                            <h4 class="text-xs font-bold text-indigo-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                                <svg class="w-4 h-4 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 001.5-1.5V6a1.5 1.5 0 00-1.5-1.5H3.75A1.5 1.5 0 002.25 6v12a1.5 1.5 0 001.5 1.5zm10.5-11.25h.008v.008h-.008V8.25zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z" />
+                                </svg>
+                                Đề xuất thiết kế hình ảnh (AI Prompt)
+                            </h4>
+                            <p class="text-sm text-slate-300 italic" x-text="selectedPost.image_prompt || 'Chưa có prompt hình ảnh'"></p>
+                        </div>
+
+                        <!-- Media Upload Box -->
+                        <div class="form-group">
+                            <label class="form-label">Tải lên hình ảnh/video bài viết (Thumbnail SEO / Hình Ảnh Fanpage)</label>
+                            
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 items-center mt-2">
+                                <!-- Upload Area -->
+                                <div class="relative flex flex-col items-center justify-center p-6 border-2 border-dashed border-white/[0.08] hover:border-teal-500/40 rounded-xl bg-white/[0.01] hover:bg-white/[0.02] transition-all duration-300 group cursor-pointer">
+                                    <input type="file" multiple
+                                           class="absolute inset-0 opacity-0 cursor-pointer"
+                                           @change="uploadMedia($event)"
+                                           :disabled="uploading">
+                                    
+                                    <template x-if="uploading">
+                                        <div class="flex flex-col items-center justify-center">
+                                            <div class="w-8 h-8 border-4 border-slate-700 border-t-teal-400 rounded-full animate-spin mb-2"></div>
+                                            <p class="text-xs text-slate-400">Đang tải file lên...</p>
+                                        </div>
+                                    </template>
+
+                                    <template x-if="!uploading">
+                                        <div class="flex flex-col items-center justify-center text-center">
+                                            <div class="w-10 h-10 rounded-lg bg-teal-500/10 flex items-center justify-center mb-2 text-teal-400 group-hover:scale-110 transition-transform">
+                                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
+                                            </div>
+                                            <p class="text-xs font-semibold text-slate-300">Click hoặc kéo thả file</p>
+                                            <p class="text-[10px] text-slate-500 mt-1">Hỗ trợ .png, .jpg, .mp4</p>
+                                        </div>
+                                    </template>
+                                </div>
+
+                                <!-- Uploaded Media Preview -->
+                                <div class="p-2 border border-white/[0.06] rounded-xl bg-white/[0.02] min-h-[120px] flex flex-col items-center justify-center">
+                                    <template x-if="getParsedMediaUrls().length > 0">
+                                        <div class="w-full">
+                                            <div class="grid gap-2" 
+                                                 :class="{
+                                                     'grid-cols-1': getParsedMediaUrls().length === 1,
+                                                     'grid-cols-2': getParsedMediaUrls().length === 2,
+                                                     'grid-cols-2': getParsedMediaUrls().length === 3 || getParsedMediaUrls().length === 4
+                                                 }">
+                                                <template x-for="(url, idx) in getParsedMediaUrls().slice(0, 4)" :key="idx">
+                                                    <div class="relative overflow-hidden rounded-lg border border-white/[0.05]"
+                                                         :class="getParsedMediaUrls().length === 3 && idx === 0 ? 'col-span-2 aspect-[2/1]' : 'aspect-square'">
+                                                        
+                                                        <template x-if="url.endsWith('.mp4')">
+                                                            <video class="w-full h-full object-cover" controls>
+                                                                <source :src="url" type="video/mp4">
+                                                            </video>
+                                                        </template>
+                                                        <template x-if="!url.endsWith('.mp4')">
+                                                            <img :src="url" class="w-full h-full object-cover" alt="Media Preview">
+                                                        </template>
+                                                        
+                                                        <!-- Remove Button -->
+                                                        <button class="absolute top-1 right-1 bg-slate-900/70 p-1 rounded-full text-red-400 hover:text-red-300 hover:bg-slate-950/90 transition-colors z-10"
+                                                                @click.prevent="removeMedia(idx)">
+                                                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                                                        </button>
+                                                        
+                                                        <!-- +N overlay if more than 4 images -->
+                                                        <template x-if="idx === 3 && getParsedMediaUrls().length > 4">
+                                                            <div class="absolute inset-0 bg-black/60 flex items-center justify-center pointer-events-none">
+                                                                <span class="text-xl font-bold text-white" x-text="'+' + (getParsedMediaUrls().length - 4)"></span>
+                                                            </div>
+                                                        </template>
+                                                    </div>
+                                                </template>
+                                            </div>
+                                        </div>
+                                    </template>
+                                    <template x-if="getParsedMediaUrls().length === 0">
+                                        <p class="text-xs text-slate-500 italic">Chưa tải file ảnh hoặc video</p>
+                                    </template>
+                                </div>
+                            </div>
+                            
+                            <!-- AI Tạo ảnh tự động -->
+                            <div class="mt-4 space-y-3">
+                                <div class="flex flex-wrap items-center gap-2">
+                                    <button type="button" class="btn btn-secondary text-xs py-1.5 px-3 flex items-center gap-1.5"
+                                            @click="previewImagePrompt()"
+                                            :disabled="aiGeneratingImage">
+                                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+                                        Xem prompt ảnh
+                                    </button>
+                                    <button type="button" class="btn text-xs py-1.5 px-3 flex items-center gap-1.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white border-0"
+                                            @click="aiGenerateImageFromButton()"
+                                            :disabled="aiGeneratingImage">
+                                        <template x-if="aiGeneratingImage">
+                                            <div class="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                                        </template>
+                                        <template x-if="!aiGeneratingImage">
+                                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"/></svg>
+                                        </template>
+                                        <span x-text="aiGeneratingImage ? 'Đang tạo...' : '🤖 AI Tạo ảnh'"></span>
+                                    </button>
+                                </div>
+                                
+                                <!-- Prompt Editor Panel -->
+                                <div x-show="showPromptEditor" 
+                                     class="p-3 rounded-lg bg-purple-500/5 border border-purple-500/10 space-y-3">
+                                    <div class="flex items-center justify-between">
+                                        <label class="text-[10px] font-bold text-purple-400 uppercase tracking-wider">Tùy chỉnh nội dung chữ in trên ảnh</label>
+                                        <button @click="showPromptEditor = false" class="text-slate-500 hover:text-slate-300">
+                                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                                        </button>
+                                    </div>
+                                    
+                                    <div class="space-y-2">
+                                        <div>
+                                            <label class="block text-[10px] text-slate-400 mb-0.5">Tiêu đề chính (Headline)</label>
+                                            <input type="text" class="form-input text-xs w-full py-1.5" x-model="selectedPost.headline" placeholder="VD: Giải pháp kính DAFA">
+                                        </div>
+                                        <div>
+                                            <label class="block text-[10px] text-slate-400 mb-0.5">Mô tả (Subheadline)</label>
+                                            <input type="text" class="form-input text-xs w-full py-1.5" x-model="selectedPost.subheadline" placeholder="VD: Sang trọng, an toàn, bền bỉ">
+                                        </div>
+                                        <div>
+                                            <label class="block text-[10px] text-slate-400 mb-0.5">Nút kêu gọi (CTA)</label>
+                                            <input type="text" class="form-input text-xs w-full py-1.5" x-model="selectedPost.cta" placeholder="VD: Nhận báo giá ngay">
+                                        </div>
+                                        <div>
+                                            <label class="block text-[10px] text-slate-400 mb-0.5">Prompt tạo nền ảnh (tùy chỉnh nâng cao)</label>
+                                            <textarea class="form-input text-xs min-h-[60px] font-mono w-full" x-model="aiImagePrompt" placeholder="AI sẽ tạo prompt tự động từ nội dung bài viết..."></textarea>
+                                        </div>
+                                    </div>
+                                    <p class="text-[9px] text-slate-500 italic">Lưu ý: Bạn có thể sửa các nội dung này trước khi bấm "AI Tạo ảnh". Ảnh sẽ tự động được ghép thêm logo và các nội dung trên.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- UTM Source Tracking -->
+                    <div class="form-group">
+                        <label class="form-label" for="utm-source">UTM Source</label>
+                        <input type="text" id="utm-source" class="form-input" placeholder="saas_dafa" x-model="selectedPost.utm_source">
+                    </div>
+
+                    <!-- Editor Body (HTML hoặc Facebook Status) -->
+                    <div class="form-group">
+                        <div class="flex justify-between items-center mb-1">
+                            <label class="form-label" for="post-body">Nội dung chi tiết</label>
+                        </div>
+                        
+                        <!-- Toolbar chèn ảnh minh họa -->
+                        <template x-if="true">
+                            <div class="flex items-center gap-2 mb-2 p-2 rounded-lg bg-white/[0.02] border border-white/[0.04]">
+                                <span class="text-[10px] text-slate-500 mr-1">Toolbar:</span>
+                                <label class="btn btn-secondary text-[10px] py-1 px-2 flex items-center gap-1 cursor-pointer relative" 
+                                       :class="inlineUploading ? 'opacity-50' : ''">
+                                    <input type="file" class="absolute inset-0 opacity-0 w-full h-full cursor-pointer" 
+                                           accept=".png,.jpg,.jpeg,.webp,.gif"
+                                           @change="uploadInlineImage($event)" 
+                                           :disabled="inlineUploading">
+                                    <template x-if="inlineUploading">
+                                        <div class="w-3 h-3 border-2 border-slate-700 border-t-white rounded-full animate-spin"></div>
+                                    </template>
+                                    <template x-if="!inlineUploading">
+                                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+                                    </template>
+                                    <span x-text="inlineUploading ? 'Đang tải...' : '🖼 Chèn ảnh minh họa'"></span>
+                                </label>
+                                <span class="text-[9px] text-slate-600">Ảnh sẽ được chèn vào cuối nội dung</span>
+                            </div>
+                        </template>
+                        
+                        <textarea id="post-body" class="form-input min-h-[260px] font-mono text-sm leading-relaxed" 
+                                  placeholder="Nhập nội dung bài viết..." 
+                                  x-model="selectedPost.body"></textarea>
+                    </div>
+
+                    <!-- Image Slots UI -->
+                    <template x-if="getImageSlots().length > 0">
+                        <div class="p-4 rounded-lg bg-emerald-500/5 border border-emerald-500/10 space-y-3">
+                            <h4 class="text-xs font-bold text-emerald-400 uppercase tracking-wider flex items-center gap-1.5">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M3 3h18v18H3V3z"/></svg>
+                                Vị trí ảnh minh họa trong bài (<span x-text="getImageSlots().length"></span> vị trí)
+                            </h4>
+                            <template x-for="slot in getImageSlots()" :key="slot.index">
+                                <div class="p-3 rounded-lg bg-white/[0.02] border border-white/[0.05] space-y-2" x-init="ensureEnglishSlotPrompt(slot)">
+                                    <div class="flex items-center justify-between">
+                                        <span class="text-xs font-semibold text-emerald-300" x-text="'📍 Vị trí #' + slot.index"></span>
+                                        <button type="button" class="btn text-[10px] py-1 px-2 flex items-center gap-1 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white border-0"
+                                                @click.prevent="generateSlotImage(slot.index)">
+                                            <template x-if="slotGenerating[slot.index]">
+                                                <div class="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                                            </template>
+                                            <span x-text="slotGenerating[slot.index] ? 'Đang tạo...' : '🎨 Generate ảnh'"></span>
+                                        </button>
+                                    </div>
+                                    <div class="space-y-1">
+                                        <label class="text-[10px] text-slate-400 font-semibold uppercase">Prompt tạo ảnh (English - gửi cho AI)</label>
+                                        <textarea :id="'slot-prompt-' + slot.index" 
+                                                  class="form-input text-[11px] min-h-[64px] font-mono" 
+                                                  :value="slot.prompt" 
+                                                  placeholder="English image prompt for AI..."></textarea>
+                                        <p class="text-[9px] text-slate-500">Nếu ô này còn lẫn tiếng Việt, đợi 1-2 giây hoặc sửa thủ công sang tiếng Anh trước khi Generate.</p>
+                                    </div>
+                                    <div class="space-y-1">
+                                        <label class="text-[10px] text-slate-400 font-semibold uppercase">Ghi chú ảnh trong bài (Tiếng Việt)</label>
+                                        <textarea :id="'slot-caption-' + slot.index" 
+                                                  class="form-input text-[11px] min-h-[42px]" 
+                                                  :value="slot.caption" 
+                                                  placeholder="Chú thích tiếng Việt hiển thị dưới ảnh..."></textarea>
+                                    </div>
+                                </div>
+                            </template>
+                        </div>
+                    </template>
+
+                    <!-- Inline Generated Images Preview -->
+                    <template x-if="getInlineImages().length > 0">
+                        <div class="p-4 rounded-lg bg-cyan-500/5 border border-cyan-500/10 space-y-3">
+                            <h4 class="text-xs font-bold text-cyan-400 uppercase tracking-wider flex items-center gap-1.5">
+                                🖼 Ảnh minh họa đã tạo trong bài (<span x-text="getInlineImages().length"></span>)
+                            </h4>
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                <template x-for="(img, idx) in getInlineImages()" :key="img.url + idx">
+                                    <div class="rounded-lg overflow-hidden border border-white/[0.06] bg-white/[0.02]">
+                                        <div class="aspect-video bg-slate-950 cursor-pointer" @click="openInlineImage(img.url)" title="Click để mở ảnh lớn">
+                                            <img :src="img.url" class="w-full h-full object-cover" alt="Generated inline image">
+                                        </div>
+                                        <div class="p-2 space-y-2">
+                                            <div class="text-[10px] text-slate-300 line-clamp-2" x-text="img.savedCaption || img.caption || 'Ảnh minh họa'"></div>
+                                            <div class="text-[9px] text-slate-500 line-clamp-2" x-text="img.prompt ? 'AI prompt: ' + img.prompt : ''"></div>
+                                            <div class="flex items-center gap-2">
+                                                <button type="button" class="btn btn-secondary text-[10px] py-1 px-2" @click="openInlineImage(img.url)">Xem ảnh lớn</button>
+                                                <button type="button" class="btn text-[10px] py-1 px-2 bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20" @click="removeInlineImage(idx)">Xóa / tạo lại</button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </template>
+                            </div>
+                            <p class="text-[10px] text-slate-500">Bấm “Xóa / tạo lại” sẽ đưa ảnh về lại slot để anh sửa prompt rồi Generate ảnh mới.</p>
+                        </div>
+                    </template>
+
+                    <!-- Footer Action Buttons -->
+                    <div class="pt-4 border-t border-white/[0.06] flex items-center justify-between gap-2 flex-wrap">
+                        <div class="flex items-center gap-2">
+                            <button class="btn btn-secondary" @click="savePost()" :disabled="saving">
+                                <svg x-show="saving" class="w-4 h-4 border-2 border-slate-700 border-t-white rounded-full animate-spin mr-1"></svg>
+                                <span x-text="saving ? 'Đang lưu...' : 'Lưu thay đổi'"></span>
+                            </button>
+                            <button class="btn text-xs py-1.5 px-3 bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20" 
+                                    @click="deletePost(selectedPost.id)" :disabled="deleting">
+                                🗑 Xóa bài
+                            </button>
+                        </div>
+
+                        <div class="flex items-center gap-2">
+                            <template x-if="selectedPost.status === 'Approved' || selectedPost.status === 'Failed'">
+                                <button class="btn text-xs py-1.5 px-3 bg-amber-500/10 text-amber-400 border border-amber-500/20 hover:bg-amber-500/20" 
+                                        @click="revertPost()" :disabled="reverting">
+                                    ✏️ Chỉnh sửa lại
+                                </button>
+                            </template>
+                            <template x-if="selectedPost.status === 'Pending Review' || selectedPost.status === 'Failed'">
+                                <button class="btn btn-primary btn-pulse" @click="approvePost()" :disabled="approving">
+                                    <svg x-show="approving" class="w-4 h-4 border-2 border-slate-950 border-t-slate-800 rounded-full animate-spin mr-1"></svg>
+                                    <span>Duyệt bài viết ✓</span>
+                                </button>
+                            </template>
+                        </div>
+                    </div>
+
+                </div>
+
+                <!-- TAB: PREVIEW (Xem trước) -->
+                <div x-show="editorTab === 'preview'" class="space-y-6">
+                    
+                    <!-- PREVIEW WEB SEO -->
+                    <template x-if="selectedPost.platform === 'Web'">
+                        <div class="space-y-6">
+                            
+                            <!-- Google Search Result Preview Mockup -->
+                            <div class="p-6 rounded-xl bg-slate-900 border border-slate-800 space-y-2 max-w-xl">
+                                <div class="text-[11px] text-slate-400 font-mono flex items-center gap-1">
+                                    <span>https://dafaglass.com</span>
+                                    <span>›</span>
+                                    <span class="truncate">blog</span>
+                                </div>
+                                <h4 class="text-xl text-[#8ab4f8] hover:underline cursor-pointer font-medium font-sans leading-tight leading-snug"
+                                    x-text="selectedPost.meta_title || selectedPost.title"></h4>
+                                <p class="text-sm text-slate-300 font-sans leading-normal"
+                                   x-text="selectedPost.meta_description || 'Vui lòng điền meta description để hiển thị preview chuẩn xác trên Google search snippet...'"></p>
+                            </div>
+
+                            <!-- Styled Web Page Body Preview -->
+                            <div class="p-6 rounded-xl bg-[#1a1a2e] border border-white/[0.04]">
+                                <h1 class="text-3xl font-heading font-bold text-white mb-6" x-text="selectedPost.title"></h1>
+                                
+                                <template x-if="getParsedMediaUrls().length > 0">
+                                    <div class="mb-6 rounded-lg overflow-hidden border border-white/[0.05]">
+                                        <template x-if="getParsedMediaUrls().length > 0 && getParsedMediaUrls()[0].endsWith('.mp4')">
+                                            <video class="w-full max-h-[400px] object-cover" controls>
+                                                <source :src="getParsedMediaUrls()[0]" type="video/mp4">
+                                            </video>
+                                        </template>
+                                        <template x-if="getParsedMediaUrls().length > 0 && !getParsedMediaUrls()[0].endsWith('.mp4')">
+                                            <img :src="getParsedMediaUrls()[0]" class="w-full max-h-[400px] object-cover" alt="Featured Image">
+                                        </template>
+                                    </div>
+                                </template>
+
+                                <div class="prose prose-invert max-w-none text-slate-300 space-y-4" x-html="selectedPost.body || '<p class=\'italic text-slate-600\'>Nội dung bài viết trống.</p>'"></div>
+                            </div>
+                        </div>
+                    </template>
+
+                    <!-- PREVIEW FACEBOOK FANPAGE -->
+                    <template x-if="selectedPost.platform === 'Fanpage'">
+                        <div class="mx-auto bg-[#18191a] border border-[#2f3031] rounded-xl shadow-lg overflow-hidden text-[#e4e6eb] font-sans"
+                             :class="(selectedPost.fb_post_type === 'story' || selectedPost.fb_post_type === 'reel') ? 'max-w-[320px] aspect-[9/16] relative' : 'max-w-md'">
+                            
+                            <!-- FB Post Header -->
+                            <template x-if="selectedPost.fb_post_type === 'post' || !selectedPost.fb_post_type">
+                                <div class="p-4 flex items-center justify-between">
+                                    <div class="flex items-center gap-3">
+                                        <div class="w-10 h-10 rounded-full bg-gradient-to-br from-teal-400 to-indigo-500 flex items-center justify-center font-bold text-sm text-slate-950">
+                                            DF
+                                        </div>
+                                        <div>
+                                            <h5 class="text-sm font-semibold text-white">DAFA Glass</h5>
+                                            <div class="flex items-center gap-1 text-[11px] text-[#b0b3b8]">
+                                                <span x-text="formatDateTime(selectedPost.scheduled_at) || 'Được tài trợ'"></span>
+                                                <span>•</span>
+                                                <span>🌎</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <button class="text-[#b0b3b8] hover:bg-white/5 w-8 h-8 rounded-full flex items-center justify-center font-bold">•••</button>
+                                </div>
+                            </template>
+
+                            <!-- FB Post Body Text -->
+                            <template x-if="selectedPost.fb_post_type === 'post' || !selectedPost.fb_post_type">
+                                <div class="px-4 pb-3 text-sm whitespace-pre-wrap leading-relaxed" x-text="selectedPost.body || 'Nội dung bài viết trống.'"></div>
+                            </template>
+
+                            <!-- FB Media Preview -->
+                            <template x-if="getParsedMediaUrls().length > 0">
+                                <div class="border-t border-b border-[#2f3031] bg-black"
+                                     :class="(selectedPost.fb_post_type === 'story' || selectedPost.fb_post_type === 'reel') ? 'absolute inset-0 z-0' : 'max-h-[500px]'">
+                                    
+                                    <!-- Grid for standard post -->
+                                    <template x-if="selectedPost.fb_post_type === 'post' || !selectedPost.fb_post_type">
+                                        <div class="w-full">
+                                            <div class="grid gap-0.5" 
+                                                 :class="{
+                                                     'grid-cols-1': getParsedMediaUrls().length === 1,
+                                                     'grid-cols-2': getParsedMediaUrls().length === 2,
+                                                     'grid-cols-2': getParsedMediaUrls().length === 3 || getParsedMediaUrls().length === 4
+                                                 }">
+                                                <template x-for="(url, idx) in getParsedMediaUrls().slice(0, 4)" :key="idx">
+                                                    <div class="relative overflow-hidden bg-[#242526]"
+                                                         :class="getParsedMediaUrls().length === 3 && idx === 0 ? 'col-span-2 aspect-[2/1]' : (getParsedMediaUrls().length === 1 ? '' : 'aspect-square')">
+                                                        
+                                                        <template x-if="url.endsWith('.mp4')">
+                                                            <video class="w-full h-full" :class="getParsedMediaUrls().length === 1 ? 'max-h-[500px] object-contain' : 'object-cover'" controls>
+                                                                <source :src="url" type="video/mp4">
+                                                            </video>
+                                                        </template>
+                                                        <template x-if="!url.endsWith('.mp4')">
+                                                            <img :src="url" class="w-full h-full" :class="getParsedMediaUrls().length === 1 ? 'max-h-[500px] object-contain' : 'object-cover'" alt="FB Post Media">
+                                                        </template>
+                                                        
+                                                        <template x-if="idx === 3 && getParsedMediaUrls().length > 4">
+                                                            <div class="absolute inset-0 bg-black/50 flex items-center justify-center pointer-events-none">
+                                                                <span class="text-3xl font-bold text-white" x-text="'+' + (getParsedMediaUrls().length - 4)"></span>
+                                                            </div>
+                                                        </template>
+                                                    </div>
+                                                </template>
+                                            </div>
+                                        </div>
+                                    </template>
+                                    
+                                    <!-- Story / Reel format -->
+                                    <template x-if="selectedPost.fb_post_type === 'story' || selectedPost.fb_post_type === 'reel'">
+                                        <div class="w-full h-full relative">
+                                            <template x-if="getParsedMediaUrls().length > 0 && getParsedMediaUrls()[0].endsWith('.mp4')">
+                                                <video class="w-full h-full object-cover" autoplay loop muted playsinline>
+                                                    <source :src="getParsedMediaUrls()[0]" type="video/mp4">
+                                                </video>
+                                            </template>
+                                            <template x-if="getParsedMediaUrls().length > 0 && !getParsedMediaUrls()[0].endsWith('.mp4')">
+                                                <img :src="getParsedMediaUrls()[0]" class="w-full h-full object-cover" alt="FB Story">
+                                            </template>
+                                            
+                                            <!-- Story/Reel Overlay UI -->
+                                            <div class="absolute top-0 inset-x-0 p-4 bg-gradient-to-b from-black/60 to-transparent flex items-center gap-3">
+                                                <div class="w-8 h-8 rounded-full bg-gradient-to-br from-teal-400 to-indigo-500 flex items-center justify-center font-bold text-xs text-slate-950 border border-white/20">DF</div>
+                                                <div>
+                                                    <h5 class="text-sm font-semibold text-white drop-shadow-md">DAFA Glass</h5>
+                                                </div>
+                                            </div>
+                                            
+                                            <div class="absolute bottom-0 inset-x-0 p-4 bg-gradient-to-t from-black/80 via-black/40 to-transparent">
+                                                <div class="text-sm text-white drop-shadow-md whitespace-pre-wrap line-clamp-3" x-text="selectedPost.body"></div>
+                                            </div>
+                                        </div>
+                                    </template>
+                                </div>
+                            </template>
+
+                            <template x-if="selectedPost.fb_post_type === 'post' || !selectedPost.fb_post_type">
+                                <!-- FB Actions Mockup -->
+                                <div class="px-4 py-2 flex justify-around text-xs text-[#b0b3b8] font-semibold">
+                                    <button class="flex items-center gap-2 hover:bg-white/5 py-1.5 px-4 rounded-md flex-1 justify-center transition-colors">
+                                        👍 Thích
+                                    </button>
+                                    <button class="flex items-center gap-2 hover:bg-white/5 py-1.5 px-4 rounded-md flex-1 justify-center transition-colors">
+                                        💬 Bình luận
+                                    </button>
+                                    <button class="flex items-center gap-2 hover:bg-white/5 py-1.5 px-4 rounded-md flex-1 justify-center transition-colors">
+                                        ↗️ Chia sẻ
+                                    </button>
+                                </div>
+                            </template>
+                        </div>
+                    </template>
+
+                </div>
+
+            </div>
+        </template>
+
+    </div>
+
+</div>
+{% endblock %}

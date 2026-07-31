@@ -1,0 +1,8 @@
+182: def generate_completion(prompt: str) -> str:
+215: def generate_image(prompt: str) -> str:
+284: def generate_content_plan(
+304: def generate_post_content(
+322: def generate_video_research(campaign_name: str, core_theme: str, platform: str) -> str:
+370: def generate_video_plan(
+623: def generate_video_script(title: str, content_line: str, platform: str, ai_prompt: str = None, vibe: str = "Chuyên nghiệp") -> List[Dict[str, Any]]:
+956: def generate_insights(campaign_name: str, month_year: str, focus_products: str, metrics_summary: str) -> str:

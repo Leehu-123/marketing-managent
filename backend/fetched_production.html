@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="vi" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Đăng nhập | DAFA Glass Automation</title>
+    
+    <!-- TailwindCSS & Alpine.js -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+    
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body class="bg-slate-950 text-slate-300 font-body min-h-screen flex items-center justify-center relative overflow-hidden">
+
+    <!-- Background effects -->
+    <div class="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-teal-500/20 rounded-full blur-[120px] pointer-events-none"></div>
+    <div class="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-purple-500/20 rounded-full blur-[120px] pointer-events-none"></div>
+
+    <div class="w-full max-w-md px-6 relative z-10" x-data="loginForm()">
+        
+        <div class="text-center mb-8">
+            <div class="w-16 h-16 mx-auto bg-gradient-to-br from-teal-400 to-cyan-600 rounded-2xl flex items-center justify-center mb-4 shadow-[0_0_30px_rgba(45,212,191,0.3)]">
+                <svg class="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/>
+                </svg>
+            </div>
+            <h1 class="text-3xl font-heading font-bold text-white mb-2">DAFA Glass</h1>
+            <p class="text-slate-400">Content Automation System</p>
+        </div>
+
+        <div class="glass-card p-8 rounded-2xl">
+            <form @submit.prevent="submitLogin" class="space-y-5">
+                
+                <div x-show="errorMessage" x-cloak class="bg-red-500/10 border border-red-500/20 text-red-400 text-sm p-3 rounded-lg flex items-start gap-2">
+                    <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                    <span x-text="errorMessage"></span>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label text-sm text-slate-300">Tên đăng nhập</label>
+                    <input type="text" x-model="username" class="form-input w-full py-2.5 px-4 bg-white/[0.03] border-white/[0.08]" placeholder="Nhập tên đăng nhập..." required autofocus>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label text-sm text-slate-300">Mật khẩu</label>
+                    <input type="password" x-model="password" class="form-input w-full py-2.5 px-4 bg-white/[0.03] border-white/[0.08]" placeholder="Nhập mật khẩu..." required>
+                </div>
+
+                <div class="flex items-center gap-2 mt-2">
+                    <input type="checkbox" id="remember" x-model="rememberMe" class="w-4 h-4 rounded border-slate-600 text-teal-500 focus:ring-teal-500 bg-slate-800">
+                    <label for="remember" class="text-sm text-slate-400 cursor-pointer select-none">Ghi nhớ đăng nhập</label>
+                </div>
+
+                <button type="submit" class="w-full py-3 px-4 bg-gradient-to-r from-teal-500 to-cyan-600 hover:from-teal-400 hover:to-cyan-500 text-white font-medium rounded-lg transition-all duration-300 shadow-[0_0_20px_rgba(45,212,191,0.2)] hover:shadow-[0_0_25px_rgba(45,212,191,0.4)] flex items-center justify-center gap-2" :disabled="loading">
+                    <svg x-show="loading" class="w-5 h-5 animate-spin text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    <span x-text="loading ? 'Đang xác thực...' : 'Đăng nhập'"></span>
+                </button>
+            </form>
+        </div>
+        
+        <p class="text-center text-xs text-slate-500 mt-8">
+            &copy; 2026 DAFA Glass. All rights reserved.
+        </p>
+
+    </div>
+
+    <script>
+        function loginForm() {
+            return {
+                username: '',
+                password: '',
+                rememberMe: false,
+                loading: false,
+                errorMessage: '',
+                
+                init() {
+                    const savedUser = localStorage.getItem('dafa_username');
+                    const savedPass = localStorage.getItem('dafa_password');
+                    if (savedUser && savedPass) {
+                        this.username = savedUser;
+                        this.password = savedPass;
+                        this.rememberMe = true;
+                    }
+                },
+                
+                async submitLogin() {
+                    this.loading = true;
+                    this.errorMessage = '';
+                    
+                    try {
+                        const res = await fetch('/api/v1/auth/login', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify({
+                                username: this.username,
+                                password: this.password
+                            })
+                        });
+                        
+                        if (!res.ok) {
+                            const err = await res.json();
+                            throw new Error(err.detail || 'Đăng nhập thất bại');
+                        }
+                        
+                        // Xử lý ghi nhớ mật khẩu
+                        if (this.rememberMe) {
+                            localStorage.setItem('dafa_username', this.username);
+                            localStorage.setItem('dafa_password', this.password);
+                        } else {
+                            localStorage.removeItem('dafa_username');
+                            localStorage.removeItem('dafa_password');
+                        }
+                        
+                        // Đăng nhập thành công, chuyển hướng về dashboard
+                        window.location.href = '/';
+                    } catch (err) {
+                        this.errorMessage = err.message;
+                    } finally {
+                        this.loading = false;
+                    }
+                }
+            }
+        }
+    </script>
+</body>
+</html>

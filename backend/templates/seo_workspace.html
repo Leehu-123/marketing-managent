@@ -1,0 +1,584 @@
+{% extends "base.html" %}
+
+{% block title %}SEO Workspace - DAFA Glass{% endblock %}
+{% block page_title %}SEO Workspace{% endblock %}
+
+{% block content %}
+<div x-data="seoWorkspace()" x-init="init()" class="h-full flex gap-6">
+
+    <!-- LEFT PANEL: Post List -->
+    <div class="w-[320px] flex-shrink-0 flex flex-col gap-4">
+        <!-- Filter/Select Campaign -->
+        <div class="glass-card p-4">
+            <h3 class="font-heading font-semibold text-lg mb-3">Bài viết chờ SEO</h3>
+            <div class="space-y-2">
+                <template x-if="loadingPosts">
+                    <div class="animate-pulse space-y-2">
+                        <div class="h-10 bg-surface-input rounded"></div>
+                        <div class="h-10 bg-surface-input rounded"></div>
+                    </div>
+                </template>
+                <template x-for="post in posts" :key="post.id">
+                    <div @click="selectPost(post)"
+                         class="p-3 rounded-lg border border-white/5 cursor-pointer transition-all duration-200"
+                         :class="selectedPost?.id === post.id ? 'bg-accent-teal/20 border-accent-teal/50' : 'bg-surface-secondary hover:bg-surface-tertiary'">
+                        <div class="text-sm font-medium mb-1 line-clamp-2" x-text="post.title"></div>
+                        <div class="flex items-center justify-between text-xs text-gray-400">
+                            <span x-text="post.platform" class="px-2 py-0.5 rounded-full bg-white/5"></span>
+                            <span x-text="post.status" class="text-status-amber"></span>
+                        </div>
+                    </div>
+                </template>
+                <template x-if="!loadingPosts && posts.length === 0">
+                    <div class="text-sm text-gray-400 text-center py-4">Không có bài viết Web nào đang chờ xử lý.</div>
+                </template>
+            </div>
+        </div>
+    </div>
+
+    <!-- RIGHT PANEL: SEO 7-Step Pipeline -->
+    <div class="flex-1 flex flex-col min-w-0 glass-card overflow-hidden">
+        <template x-if="!selectedPost">
+            <div class="flex-1 flex items-center justify-center text-gray-400">
+                <div class="text-center">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12 mx-auto mb-3 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                    </svg>
+                    <p>Chọn một bài viết bên trái để bắt đầu quy trình SEO</p>
+                </div>
+            </div>
+        </template>
+
+        <template x-if="selectedPost">
+            <div class="flex flex-col h-full">
+                <!-- STEPPER HEADER -->
+                <div class="border-b border-white/10 p-4 bg-surface-secondary/50">
+                    <h2 class="font-heading text-xl font-semibold mb-4 text-accent-teal" x-text="selectedPost.title"></h2>
+                    
+                    <div class="flex justify-between items-center relative">
+                        <div class="absolute left-0 top-1/2 -translate-y-1/2 w-full h-0.5 bg-white/10 z-0"></div>
+                        <div class="absolute left-0 top-1/2 -translate-y-1/2 h-0.5 bg-accent-teal z-0 transition-all duration-300" :style="`width: ${(currentStep - 1) * 20}%`"></div>
+                        
+                        <template x-for="step in 6" :key="step">
+                            <div class="relative z-10 flex flex-col items-center gap-2 cursor-pointer" @click="if(step <= maxStepReached) currentStep = step">
+                                <div class="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold transition-colors"
+                                     :class="currentStep === step ? 'bg-accent-teal text-surface-primary shadow-[0_0_10px_rgba(0,212,170,0.5)]' : (step < currentStep ? 'bg-accent-teal/80 text-surface-primary' : 'bg-surface-tertiary text-gray-400 border border-white/10')">
+                                    <span x-text="step"></span>
+                                </div>
+                                <span class="text-xs whitespace-nowrap hidden lg:block"
+                                      :class="currentStep === step ? 'text-accent-teal font-medium' : 'text-gray-500'"
+                                      x-text="stepNames[step-1]"></span>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+
+                <!-- STEP CONTENT -->
+                <div class="flex-1 overflow-y-auto p-6">
+                    
+                    <!-- STEP 1: KEYWORDS -->
+                    <div x-show="currentStep === 1" x-transition.opacity>
+                        <h3 class="text-lg font-medium mb-4 flex items-center gap-2">
+                            <svg class="w-5 h-5 text-accent-cyan" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+                            Bước 1: Nghiên cứu & Mở rộng Từ khóa
+                        </h3>
+                        
+                        <div class="space-y-4">
+                            <div>
+                                <label class="block text-sm text-gray-400 mb-1">Từ khóa chính (Seed Keyword)</label>
+                                <input type="text" x-model="stepData.main_keywords" class="w-full bg-surface-input border border-white/10 rounded-lg px-4 py-2 focus:border-accent-teal focus:outline-none" placeholder="VD: kính ốp bếp, vách tắm kính...">
+                            </div>
+                            
+                            <button @click="runStep1()" :disabled="loading.step1" class="px-4 py-2 bg-white/5 hover:bg-white/10 rounded-lg border border-white/10 flex items-center gap-2 transition-colors">
+                                <span x-show="loading.step1" class="w-4 h-4 rounded-full border-2 border-accent-teal border-t-transparent animate-spin"></span>
+                                Phân tích LSI Keywords & Topic Clusters bằng AI
+                            </button>
+
+                            <div x-show="stepData.lsi_keywords.length > 0" class="mt-4 p-4 bg-surface-tertiary rounded-lg border border-white/5">
+                                <h4 class="text-sm font-medium text-gray-300 mb-2">Các từ khóa liên quan / LSI Keywords:</h4>
+                                <div class="flex flex-wrap gap-2">
+                                    <template x-for="kw in stepData.lsi_keywords">
+                                        <span class="px-3 py-1 bg-surface-secondary border border-white/10 rounded-full text-xs text-accent-cyan" x-text="kw"></span>
+                                    </template>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- STEP 2: OUTLINE -->
+                    <div x-show="currentStep === 2" x-transition.opacity style="display: none;">
+                        <h3 class="text-lg font-medium mb-4 flex items-center gap-2">
+                            <svg class="w-5 h-5 text-accent-purple" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h7"></path></svg>
+                            Bước 2: Phân tích đối thủ & Lên Dàn ý (Outline)
+                        </h3>
+                        
+                        <div class="space-y-4">
+                            <p class="text-sm text-gray-400">Dựa vào từ khóa và chủ đề, AI sẽ tạo cấu trúc thẻ H1, H2, H3 chuẩn SEO.</p>
+                            
+                            <button @click="runStep2()" :disabled="loading.step2" class="px-4 py-2 bg-gradient-to-r from-accent-purple to-accent-violet text-white rounded-lg hover:shadow-[0_0_15px_rgba(139,92,246,0.4)] transition-all flex items-center gap-2 font-medium">
+                                <span x-show="loading.step2" class="w-4 h-4 rounded-full border-2 border-white border-t-transparent animate-spin"></span>
+                                Sinh Dàn bài chuẩn SEO
+                            </button>
+
+                            <div x-show="stepData.outline" class="mt-4 p-4 bg-surface-tertiary rounded-lg border border-white/5">
+                                <div class="mb-3">
+                                    <span class="text-xs font-bold text-accent-purple bg-accent-purple/20 px-2 py-1 rounded">H1</span>
+                                    <span class="ml-2 font-heading font-medium text-white" x-text="stepData.outline?.H1 || selectedPost.title"></span>
+                                </div>
+                                <div class="space-y-2 pl-4 border-l-2 border-white/10">
+                                    <template x-for="(h2, idx) in (stepData.outline?.H2 || [])">
+                                        <div>
+                                            <span class="text-xs font-bold text-accent-teal bg-accent-teal/20 px-2 py-0.5 rounded">H2</span>
+                                            <span class="ml-2 text-sm text-gray-300" x-text="h2"></span>
+                                        </div>
+                                    </template>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- STEP 3: META TAGS -->
+                    <div x-show="currentStep === 3" x-transition.opacity style="display: none;">
+                        <h3 class="text-lg font-medium mb-4 flex items-center gap-2">
+                            <svg class="w-5 h-5 text-accent-teal" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"></path></svg>
+                            Bước 3: Tối ưu Meta Title & Meta Description
+                        </h3>
+                        
+                        <div class="space-y-4">
+                            <button @click="runStep3()" :disabled="loading.step3" class="px-4 py-2 bg-white/5 hover:bg-white/10 rounded-lg border border-white/10 flex items-center gap-2 transition-colors">
+                                <span x-show="loading.step3" class="w-4 h-4 rounded-full border-2 border-accent-teal border-t-transparent animate-spin"></span>
+                                AI Viết Meta Tags
+                            </button>
+
+                            <div class="space-y-4">
+                                <div>
+                                    <div class="flex justify-between mb-1">
+                                        <label class="text-sm text-gray-400">Meta Title</label>
+                                        <span class="text-xs" :class="(stepData.meta_title?.length > 60) ? 'text-status-red' : 'text-gray-500'" x-text="`${stepData.meta_title?.length || 0}/60`"></span>
+                                    </div>
+                                    <input type="text" x-model="stepData.meta_title" class="w-full bg-surface-input border border-white/10 rounded-lg px-4 py-2 focus:border-accent-teal focus:outline-none">
+                                </div>
+                                <div>
+                                    <div class="flex justify-between mb-1">
+                                        <label class="text-sm text-gray-400">Meta Description</label>
+                                        <span class="text-xs" :class="(stepData.meta_description?.length > 160) ? 'text-status-red' : 'text-gray-500'" x-text="`${stepData.meta_description?.length || 0}/160`"></span>
+                                    </div>
+                                    <textarea x-model="stepData.meta_description" rows="3" class="w-full bg-surface-input border border-white/10 rounded-lg px-4 py-2 focus:border-accent-teal focus:outline-none"></textarea>
+                                </div>
+                            </div>
+                            
+                            <div class="mt-4 p-4 rounded-lg border border-white/5 bg-white/5">
+                                <h4 class="text-xs text-gray-500 uppercase tracking-wider mb-2">Google Search Preview</h4>
+                                <div class="text-[20px] text-[#8ab4f8] hover:underline cursor-pointer truncate" x-text="stepData.meta_title || 'Tiêu đề trang web'"></div>
+                                <div class="text-[14px] text-[#bdc1c6] mt-1" x-text="stepData.meta_description || 'Mô tả trang web sẽ xuất hiện ở đây...'"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- STEP 4: DRAFT CONTENT -->
+                    <div x-show="currentStep === 4" x-transition.opacity style="display: none;">
+                        <h3 class="text-lg font-medium mb-4 flex items-center gap-2">
+                            <svg class="w-5 h-5 text-status-amber" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
+                            Bước 4: Soạn thảo Nội dung (Section by Section)
+                        </h3>
+                        
+                        <div class="space-y-4">
+                            <p class="text-sm text-gray-400">Chọn từng mục trong dàn ý để AI hỗ trợ viết nội dung, hoặc bạn có thể tự viết.</p>
+                            
+                            <div class="flex gap-4">
+                                <!-- Outline sections list -->
+                                <div class="w-1/3 bg-surface-tertiary rounded-lg p-3 space-y-2 max-h-[400px] overflow-y-auto">
+                                    <template x-for="(h2, idx) in (stepData.outline?.H2 || [])">
+                                        <div @click="activeSection = h2" 
+                                             class="p-2 rounded cursor-pointer text-sm transition-colors border"
+                                             :class="activeSection === h2 ? 'bg-accent-teal/20 border-accent-teal text-white' : 'bg-surface-secondary border-white/5 text-gray-400 hover:bg-white/5'">
+                                            <span x-text="h2"></span>
+                                        </div>
+                                    </template>
+                                </div>
+                                
+                                <!-- Editor -->
+                                <div class="w-2/3 space-y-3">
+                                    <div x-show="activeSection" class="p-4 bg-surface-tertiary rounded-lg border border-white/10">
+                                        <h4 class="font-medium text-accent-teal mb-2" x-text="activeSection"></h4>
+                                        <textarea x-model="sectionDrafts[activeSection]" rows="8" class="w-full bg-surface-input border border-white/10 rounded-lg px-4 py-2 focus:border-accent-teal focus:outline-none mb-3" placeholder="Nhập nội dung cho mục này..."></textarea>
+                                        
+                                        <div class="flex justify-end gap-2">
+                                            <button @click="runStep4_DraftSection(activeSection)" :disabled="loading.step4" class="px-4 py-1.5 bg-gradient-to-r from-accent-teal to-accent-cyan text-white rounded-lg hover:shadow-[0_0_15px_rgba(0,212,170,0.4)] text-sm font-medium flex items-center gap-2">
+                                                <span x-show="loading.step4" class="w-3 h-3 rounded-full border-2 border-white border-t-transparent animate-spin"></span>
+                                                AI Viết nháp đoạn này
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div x-show="!activeSection" class="p-8 text-center text-gray-500 bg-surface-tertiary rounded-lg border border-white/5 border-dashed">
+                                        Bấm vào một Heading (H2) bên trái để chỉnh sửa
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- STEP 5: ONPAGE SCORE -->
+                    <div x-show="currentStep === 5" x-transition.opacity style="display: none;">
+                        <h3 class="text-lg font-medium mb-4 flex items-center gap-2">
+                            <svg class="w-5 h-5 text-status-green" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                            Bước 5: Chấm điểm SEO Onpage
+                        </h3>
+                        
+                        <div class="space-y-6 text-center py-8">
+                            <button @click="runStep5()" :disabled="loading.step5" class="mx-auto px-6 py-3 bg-gradient-to-r from-status-green to-emerald-500 text-white rounded-xl hover:shadow-[0_0_20px_rgba(34,197,94,0.4)] font-bold text-lg flex items-center gap-2">
+                                <span x-show="loading.step5" class="w-5 h-5 rounded-full border-2 border-white border-t-transparent animate-spin"></span>
+                                Bắt đầu quét & Chấm điểm
+                            </button>
+
+                            <div x-show="stepData.seo_score !== null" class="mt-8 transition-all">
+                                <div class="relative w-32 h-32 mx-auto mb-4 flex items-center justify-center">
+                                    <svg class="w-full h-full transform -rotate-90">
+                                        <circle cx="64" cy="64" r="60" stroke="currentColor" stroke-width="8" fill="transparent" class="text-surface-tertiary"></circle>
+                                        <circle cx="64" cy="64" r="60" stroke="currentColor" stroke-width="8" fill="transparent"
+                                                :stroke-dasharray="2 * Math.PI * 60"
+                                                :stroke-dashoffset="(2 * Math.PI * 60) * (1 - stepData.seo_score / 100)"
+                                                :class="stepData.seo_score >= 80 ? 'text-status-green' : (stepData.seo_score >= 50 ? 'text-status-amber' : 'text-status-red')"></circle>
+                                    </svg>
+                                    <span class="absolute text-3xl font-bold font-heading" x-text="stepData.seo_score"></span>
+                                </div>
+                                
+                                <div x-show="stepData.seo_issues?.length > 0" class="max-w-md mx-auto text-left bg-surface-tertiary p-4 rounded-lg border border-status-amber/30">
+                                    <h4 class="font-medium text-status-amber mb-2 flex items-center gap-2">
+                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+                                        Vấn đề cần tối ưu:
+                                    </h4>
+                                    <ul class="list-disc list-inside text-sm text-gray-300 space-y-1">
+                                        <template x-for="issue in stepData.seo_issues">
+                                            <li x-text="issue"></li>
+                                        </template>
+                                    </ul>
+                                </div>
+                                <div x-show="stepData.seo_issues?.length === 0" class="text-status-green font-medium">
+                                    Tuyệt vời! Bài viết đã chuẩn SEO hoàn toàn.
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- STEP 6: PUBLISH -->
+                    <div x-show="currentStep === 6" x-transition.opacity style="display: none;">
+                        <h3 class="text-lg font-medium mb-4 flex items-center gap-2">
+                            <svg class="w-5 h-5 text-accent-cyan" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"></path></svg>
+                            Bước 6: Xác nhận & Đăng bài
+                        </h3>
+                        
+                        <div class="space-y-4">
+                            <div class="bg-surface-tertiary p-6 rounded-lg border border-white/10">
+                                <h4 class="font-heading font-medium text-lg mb-4 text-white">Tóm tắt bài viết</h4>
+                                <dl class="grid grid-cols-3 gap-4 text-sm">
+                                    <dt class="text-gray-400">Tiêu đề:</dt>
+                                    <dd class="col-span-2 text-white font-medium" x-text="selectedPost.title"></dd>
+                                    
+                                    <dt class="text-gray-400">Meta Title:</dt>
+                                    <dd class="col-span-2 text-white" x-text="stepData.meta_title || 'Chưa có'"></dd>
+                                    
+                                    <dt class="text-gray-400">Nền tảng:</dt>
+                                    <dd class="col-span-2">
+                                        <span class="px-2 py-0.5 bg-accent-teal/20 text-accent-teal rounded-full text-xs" x-text="selectedPost.platform"></span>
+                                    </dd>
+                                    
+                                    <dt class="text-gray-400">Trạng thái:</dt>
+                                    <dd class="col-span-2 text-status-amber" x-text="selectedPost.status"></dd>
+                                </dl>
+                            </div>
+
+                            <button @click="runStep6()" :disabled="loading.step6" class="w-full py-4 bg-gradient-to-r from-accent-cyan to-accent-teal text-white rounded-xl hover:shadow-[0_0_20px_rgba(0,212,170,0.5)] font-bold text-lg flex items-center justify-center gap-2 transition-all">
+                                <span x-show="loading.step6" class="w-5 h-5 rounded-full border-2 border-white border-t-transparent animate-spin"></span>
+                                Xác nhận Đăng bài (Publish)
+                            </button>
+                        </div>
+                    </div>
+
+                </div>
+
+                <!-- BOTTOM NAV -->
+                <div class="border-t border-white/10 p-4 bg-surface-secondary flex justify-between">
+                    <button @click="currentStep--" x-show="currentStep > 1" class="px-4 py-2 bg-surface-tertiary hover:bg-white/10 rounded-lg text-sm font-medium transition-colors">
+                        &larr; Quay lại
+                    </button>
+                    <div x-show="currentStep === 1"></div> <!-- spacer -->
+                    
+                    <button @click="nextStep()" x-show="currentStep < 6" class="px-6 py-2 bg-accent-teal text-surface-primary hover:bg-accent-cyan rounded-lg text-sm font-bold transition-colors shadow-[0_0_10px_rgba(0,212,170,0.3)]">
+                        Tiếp theo &rarr;
+                    </button>
+                </div>
+            </div>
+        </template>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts_extra %}
+<script>
+function seoWorkspace() {
+    return {
+        posts: [],
+        loadingPosts: false,
+        selectedPost: null,
+        
+        currentStep: 1,
+        maxStepReached: 1,
+        stepNames: ["Từ khóa", "Dàn ý", "Meta Tags", "Viết bài", "Chấm điểm", "Đăng bài"],
+        
+        loading: {
+            step1: false, step2: false, step3: false, step4: false, step5: false, step6: false
+        },
+        
+        stepData: {
+            main_keywords: "",
+            lsi_keywords: [],
+            outline: null,
+            meta_title: "",
+            meta_description: "",
+            seo_score: null,
+            seo_issues: []
+        },
+        
+        activeSection: null,
+        sectionDrafts: {},
+
+        async init() {
+            this.loadPosts();
+        },
+
+        async loadPosts() {
+            this.loadingPosts = true;
+            try {
+                // Fetch campaigns first to get plans/posts. For simplicity in UI, we fetch posts from /api/v1/posts if exists
+                // Since there is no /posts list API currently, we fetch campaigns -> plans -> posts.
+                const res = await fetch('/api/v1/campaigns/');
+                const allCampaigns = await res.json();
+                const campaigns = allCampaigns.filter(c => c.campaign_type !== 'Video');
+                let allPosts = [];
+                for (let c of campaigns) {
+                    const plansRes = await fetch(`/api/v1/campaigns/${c.id}/plans`);
+                    const plans = await plansRes.json();
+                    for (let p of plans) {
+                        // Normally we fetch post details. Here we assume we only care about Web platforms
+                        if (p.platform === "Website" || p.platform === "Web" || p.status === "Pending Review") {
+                            // Fetch post specifically
+                            try {
+                                const postRes = await fetch(`/api/v1/posts/by-plan/${p.id}`); // Use by-plan endpoint
+                                if (postRes.ok) {
+                                    const postData = await postRes.json();
+                                    if(postData.status !== 'Published') {
+                                        allPosts.push({...postData, platform: p.platform});
+                                    }
+                                }
+                            } catch(e) {}
+                        }
+                    }
+                }
+                this.posts = allPosts;
+            } catch (e) {
+                window.showToast("Không thể tải danh sách bài viết", "error");
+            } finally {
+                this.loadingPosts = false;
+            }
+        },
+
+        selectPost(post) {
+            this.selectedPost = post;
+            this.currentStep = 1;
+            this.maxStepReached = 1;
+            
+            // Populate initial data
+            this.stepData.main_keywords = ""; // Should come from campaign really
+            this.stepData.lsi_keywords = [];
+            this.stepData.outline = post.headings_structure ? JSON.parse(post.headings_structure) : null;
+            this.stepData.meta_title = post.meta_title || "";
+            this.stepData.meta_description = post.meta_description || "";
+            this.stepData.seo_score = null;
+            this.stepData.seo_issues = [];
+            
+            this.sectionDrafts = {};
+            this.activeSection = null;
+            
+            // If it already has outline, maybe they reached step 2 or 3
+            if (this.stepData.outline) this.maxStepReached = Math.max(this.maxStepReached, 2);
+            if (this.stepData.meta_title) this.maxStepReached = Math.max(this.maxStepReached, 3);
+            if (post.body) this.maxStepReached = Math.max(this.maxStepReached, 4);
+        },
+
+        nextStep() {
+            if (this.currentStep < 6) {
+                this.currentStep++;
+                if (this.currentStep > this.maxStepReached) {
+                    this.maxStepReached = this.currentStep;
+                }
+            }
+        },
+
+        // API Callers
+        async runStep1() {
+            if (!this.stepData.main_keywords) {
+                window.showToast("Vui lòng nhập từ khóa chính", "warning");
+                return;
+            }
+            this.loading.step1 = true;
+            try {
+                const res = await fetch('/api/v1/seo-workspace/step1-keywords', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ post_id: this.selectedPost.id, main_keywords: this.stepData.main_keywords })
+                });
+                const data = await res.json();
+                if (res.ok) {
+                    this.stepData.lsi_keywords = data.lsi_keywords;
+                    window.showToast("Mở rộng từ khóa thành công", "success");
+                    this.maxStepReached = Math.max(this.maxStepReached, 2);
+                } else throw new Error(data.detail);
+            } catch (e) {
+                window.showToast(e.message, "error");
+            } finally {
+                this.loading.step1 = false;
+            }
+        },
+
+        async runStep2() {
+            this.loading.step2 = true;
+            try {
+                const res = await fetch('/api/v1/seo-workspace/step2-outline', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ post_id: this.selectedPost.id, competitor_urls: [] })
+                });
+                const data = await res.json();
+                if (res.ok) {
+                    this.stepData.outline = data.outline;
+                    window.showToast("Sinh dàn ý thành công", "success");
+                    this.maxStepReached = Math.max(this.maxStepReached, 3);
+                } else throw new Error(data.detail);
+            } catch (e) {
+                window.showToast(e.message, "error");
+            } finally {
+                this.loading.step2 = false;
+            }
+        },
+
+        async runStep3() {
+            this.loading.step3 = true;
+            try {
+                const res = await fetch('/api/v1/seo-workspace/step3-meta', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ post_id: this.selectedPost.id, target_keyword: this.stepData.main_keywords || this.selectedPost.title })
+                });
+                const data = await res.json();
+                if (res.ok) {
+                    this.stepData.meta_title = data.meta_title;
+                    this.stepData.meta_description = data.meta_description;
+                    window.showToast("Tối ưu thẻ Meta thành công", "success");
+                    this.maxStepReached = Math.max(this.maxStepReached, 4);
+                } else throw new Error(data.detail);
+            } catch (e) {
+                window.showToast(e.message, "error");
+            } finally {
+                this.loading.step3 = false;
+            }
+        },
+
+        async runStep4_DraftSection(sectionName) {
+            this.loading.step4 = true;
+            try {
+                const res = await fetch('/api/v1/seo-workspace/step4-draft-section', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        post_id: this.selectedPost.id, 
+                        section_title: sectionName,
+                        section_context: `Từ khóa chính: ${this.stepData.main_keywords}. Từ khóa phụ: ${this.stepData.lsi_keywords.join(', ')}`
+                    })
+                });
+                const data = await res.json();
+                if (res.ok) {
+                    // Cập nhật textarea
+                    // Lọc bỏ thẻ <h2> vì textarea chỉ hiện text/html nháp
+                    let content = data.section_html.replace(/<h2>.*?<\/h2>/g, '').trim();
+                    this.sectionDrafts[sectionName] = content;
+                    
+                    window.showToast(`Đã viết xong mục: ${sectionName}`, "success");
+                    this.maxStepReached = Math.max(this.maxStepReached, 5);
+                } else throw new Error(data.detail);
+            } catch (e) {
+                window.showToast(e.message, "error");
+            } finally {
+                this.loading.step4 = false;
+            }
+        },
+
+        async runStep5() {
+            this.loading.step5 = true;
+            try {
+                // Cần update toàn bộ body trước khi chấm điểm (Gộp sectionDrafts lại)
+                let fullBody = "";
+                if(this.stepData.outline && this.stepData.outline.H2) {
+                    for(let h2 of this.stepData.outline.H2) {
+                        if(this.sectionDrafts[h2]) {
+                            fullBody += `<h2>${h2}</h2>\n${this.sectionDrafts[h2]}\n\n`;
+                        }
+                    }
+                }
+                
+                // Gọi PUT update post data
+                await fetch(`/api/v1/posts/${this.selectedPost.id}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        meta_title: this.stepData.meta_title,
+                        meta_description: this.stepData.meta_description,
+                        body: fullBody || this.selectedPost.body
+                    })
+                });
+
+                const res = await fetch('/api/v1/seo-workspace/step5-score', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ post_id: this.selectedPost.id, main_keywords: this.stepData.main_keywords || this.selectedPost.title })
+                });
+                const data = await res.json();
+                if (res.ok) {
+                    this.stepData.seo_score = data.seo_score;
+                    this.stepData.seo_issues = data.issues;
+                    window.showToast("Chấm điểm thành công", "success");
+                    if (data.seo_score >= 80) {
+                        this.maxStepReached = Math.max(this.maxStepReached, 6);
+                    }
+                } else throw new Error(data.detail);
+            } catch (e) {
+                window.showToast(e.message, "error");
+            } finally {
+                this.loading.step5 = false;
+            }
+        },
+
+        async runStep6() {
+            this.loading.step6 = true;
+            try {
+                const res = await fetch(`/api/v1/seo-workspace/step6-publish?post_id=${this.selectedPost.id}`, {
+                    method: 'POST'
+                });
+                const data = await res.json();
+                if (res.ok) {
+                    this.selectedPost.status = "Published";
+                    window.showToast("Đăng bài thành công lên hệ thống!", "success");
+                    // Reload danh sách
+                    this.loadPosts();
+                    this.selectedPost = null;
+                } else throw new Error(data.detail);
+            } catch (e) {
+                window.showToast(e.message, "error");
+            } finally {
+                this.loading.step6 = false;
+            }
+        }
+    }
+}
+</script>
+{% endblock %}

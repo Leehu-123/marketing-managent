@@ -1,0 +1,216 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div x-data="videoAnalytics()" x-init="init()" class="space-y-6">
+    <!-- Header -->
+    <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        <div>
+            <h1 class="text-3xl font-display font-bold text-transparent bg-clip-text bg-gradient-to-r from-teal-400 to-emerald-400">
+                Phân Tích Video Đa Kênh
+            </h1>
+            <p class="text-gray-400 mt-1">Theo dõi hiệu suất đa nền tảng và nhận Insight từ AI</p>
+        </div>
+        <div class="flex gap-3">
+            <select x-model="timeRange" @change="fetchData()" class="bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-teal-500 transition-colors">
+                <option value="7">7 ngày qua</option>
+                <option value="30">30 ngày qua</option>
+                <option value="90">90 ngày qua</option>
+            </select>
+        </div>
+    </div>
+
+    <!-- Summary Metrics -->
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <!-- Views -->
+        <div class="glass-card p-6">
+            <div class="flex items-center gap-4 mb-4">
+                <div class="p-3 bg-teal-500/20 rounded-xl">
+                    <svg class="w-6 h-6 text-teal-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
+                </div>
+                <div>
+                    <p class="text-gray-400 text-sm">Tổng Lượt Xem</p>
+                    <h3 class="text-2xl font-bold text-white">458.2K</h3>
+                </div>
+            </div>
+            <div class="flex items-center text-emerald-400 text-sm">
+                <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"></path></svg>
+                <span>+24.5% so với kỳ trước</span>
+            </div>
+        </div>
+
+        <!-- Engagement -->
+        <div class="glass-card p-6">
+            <div class="flex items-center gap-4 mb-4">
+                <div class="p-3 bg-purple-500/20 rounded-xl">
+                    <svg class="w-6 h-6 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"></path></svg>
+                </div>
+                <div>
+                    <p class="text-gray-400 text-sm">Tương Tác Tổng</p>
+                    <h3 class="text-2xl font-bold text-white">32.1K</h3>
+                </div>
+            </div>
+            <div class="flex items-center text-emerald-400 text-sm">
+                <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"></path></svg>
+                <span>+12.3% so với kỳ trước</span>
+            </div>
+        </div>
+
+        <!-- Avg ER -->
+        <div class="glass-card p-6">
+            <div class="flex items-center gap-4 mb-4">
+                <div class="p-3 bg-indigo-500/20 rounded-xl">
+                    <svg class="w-6 h-6 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                </div>
+                <div>
+                    <p class="text-gray-400 text-sm">Engagement Rate</p>
+                    <h3 class="text-2xl font-bold text-white">7.8%</h3>
+                </div>
+            </div>
+            <div class="flex items-center text-amber-400 text-sm">
+                <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 17h8m0 0V9m0 8l-8-8-4 4-6-6"></path></svg>
+                <span>-2.1% so với kỳ trước</span>
+            </div>
+        </div>
+
+        <!-- Leads Generated -->
+        <div class="glass-card p-6">
+            <div class="flex items-center gap-4 mb-4">
+                <div class="p-3 bg-amber-500/20 rounded-xl">
+                    <svg class="w-6 h-6 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
+                </div>
+                <div>
+                    <p class="text-gray-400 text-sm">Leads Thu Được</p>
+                    <h3 class="text-2xl font-bold text-white">245</h3>
+                </div>
+            </div>
+            <div class="flex items-center text-emerald-400 text-sm">
+                <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"></path></svg>
+                <span>+45.2% so với kỳ trước</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Charts Row -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <!-- Views Timeline -->
+        <div class="glass-card p-6 lg:col-span-2">
+            <h3 class="text-lg font-bold text-white mb-6">Biểu đồ Lượt Xem Theo Nền Tảng</h3>
+            <div class="h-80 flex items-center justify-center border-2 border-dashed border-white/10 rounded-xl">
+                <p class="text-gray-500">Khu vực hiển thị biểu đồ Chart.js (Line Chart)</p>
+                <!-- Canvas placeholder -->
+                <!-- <canvas id="viewsChart"></canvas> -->
+            </div>
+        </div>
+
+        <!-- Platform Distribution -->
+        <div class="glass-card p-6">
+            <h3 class="text-lg font-bold text-white mb-6">Phân Bổ Kênh</h3>
+            <div class="h-80 flex items-center justify-center border-2 border-dashed border-white/10 rounded-xl">
+                <p class="text-gray-500">Khu vực hiển thị Doughnut Chart</p>
+                <!-- Canvas placeholder -->
+            </div>
+        </div>
+    </div>
+
+    <!-- AI Insights & Cross-Channel Sync -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <!-- AI Recommendations -->
+        <div class="glass-card p-6 bg-gradient-to-br from-indigo-900/40 to-transparent border-indigo-500/30">
+            <div class="flex items-center gap-3 mb-6">
+                <div class="p-2 bg-indigo-500/20 rounded-lg">
+                    <span class="text-xl">🤖</span>
+                </div>
+                <h3 class="text-xl font-bold text-indigo-300">AI Video Insights</h3>
+            </div>
+            
+            <div class="space-y-4">
+                <div class="p-4 bg-white/5 rounded-xl border border-white/5">
+                    <h4 class="text-emerald-400 font-bold mb-1 flex items-center gap-2">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"></path></svg>
+                        Điểm sáng (Winning Trends)
+                    </h4>
+                    <p class="text-gray-300 text-sm">Các video theo chủ đề "Hậu trường thi công" đang có tỷ lệ giữ chân (Retention rate) cao hơn 40% so với trung bình. TikTok là kênh mang lại 65% Lead.</p>
+                </div>
+                
+                <div class="p-4 bg-white/5 rounded-xl border border-white/5">
+                    <h4 class="text-amber-400 font-bold mb-1 flex items-center gap-2">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+                        Cần cải thiện (To Improve)
+                    </h4>
+                    <p class="text-gray-300 text-sm">YouTube Shorts đang có tỷ lệ Click-through-rate (CTR) thấp (1.2%). AI đề xuất thay đổi thumbnail rực rỡ hơn và thêm text nổi bật 3 giây đầu.</p>
+                </div>
+            </div>
+            
+            <button class="mt-6 w-full py-3 bg-indigo-500 hover:bg-indigo-600 text-white font-bold rounded-xl transition-colors shadow-lg shadow-indigo-500/20">
+                Lập kế hoạch tối ưu tháng sau
+            </button>
+        </div>
+
+        <!-- Cross Channel Sync Table -->
+        <div class="glass-card p-6">
+            <h3 class="text-lg font-bold text-white mb-6">So sánh cùng 1 Video (Cross-Channel)</h3>
+            
+            <div class="overflow-x-auto">
+                <table class="w-full text-left">
+                    <thead>
+                        <tr class="border-b border-white/10 text-gray-400 text-sm">
+                            <th class="pb-3 font-medium">Video Concept</th>
+                            <th class="pb-3 font-medium text-center">TikTok</th>
+                            <th class="pb-3 font-medium text-center">YouTube</th>
+                            <th class="pb-3 font-medium text-center">Facebook</th>
+                        </tr>
+                    </thead>
+                    <tbody class="text-sm">
+                        <tr class="border-b border-white/5 hover:bg-white/5 transition-colors">
+                            <td class="py-4 text-white">TVC Kính Hộp 2026</td>
+                            <td class="py-4 text-center">
+                                <span class="text-emerald-400 font-bold">125K</span>
+                                <div class="text-xs text-gray-500">Views</div>
+                            </td>
+                            <td class="py-4 text-center">
+                                <span class="text-gray-300">12K</span>
+                                <div class="text-xs text-gray-500">Views</div>
+                            </td>
+                            <td class="py-4 text-center">
+                                <span class="text-amber-400 font-bold">45K</span>
+                                <div class="text-xs text-gray-500">Views</div>
+                            </td>
+                        </tr>
+                        <tr class="border-b border-white/5 hover:bg-white/5 transition-colors">
+                            <td class="py-4 text-white">Review Bàn Kính Cường Lực</td>
+                            <td class="py-4 text-center">
+                                <span class="text-gray-300">8K</span>
+                                <div class="text-xs text-gray-500">Views</div>
+                            </td>
+                            <td class="py-4 text-center">
+                                <span class="text-emerald-400 font-bold">89K</span>
+                                <div class="text-xs text-gray-500">Views</div>
+                            </td>
+                            <td class="py-4 text-center">
+                                <span class="text-gray-300">5K</span>
+                                <div class="text-xs text-gray-500">Views</div>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    function videoAnalytics() {
+        return {
+            timeRange: '30',
+            init() {
+                console.log("Analytics initialized");
+                // In real app, initialize Chart.js here
+            },
+            fetchData() {
+                console.log("Fetching data for range:", this.timeRange);
+                // Call API: /api/v1/analytics/video?days=X
+            }
+        }
+    }
+</script>
+{% endblock %}

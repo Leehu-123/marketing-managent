@@ -1,0 +1,358 @@
+{% extends 'base.html' %}
+{% block active_nav %}brand{% endblock %}
+{% block page_title %}Hồ sơ Thương hiệu{% endblock %}
+
+{% block content %}
+<div x-data="brandProfileApp()" class="max-w-6xl mx-auto space-y-6">
+
+    <!-- OVERVIEW SECTION -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <!-- Brand Identity -->
+        <div class="glass-card p-6 lg:col-span-1 flex flex-col items-center text-center">
+            <h2 class="text-lg font-heading font-semibold text-white mb-6 w-full text-left">Nhận diện Thương hiệu</h2>
+            
+            <div class="relative w-32 h-32 rounded-2xl border-2 border-dashed border-slate-600 flex items-center justify-center overflow-hidden bg-white/[0.02] group mb-4">
+                <template x-if="logoInfo.logo_url">
+                    <img :src="logoInfo.logo_url" class="w-full h-full object-contain p-2">
+                </template>
+                <template x-if="!logoInfo.logo_url">
+                    <div class="text-slate-500 flex flex-col items-center">
+                        <svg class="w-8 h-8 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+                        <span class="text-xs">Chưa có Logo</span>
+                    </div>
+                </template>
+                
+                <div class="absolute inset-0 bg-black/60 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button class="btn btn-primary text-xs py-1 px-3" @click="$refs.logoInput.click()">
+                        <span x-show="!logoUploading">Đổi Logo</span>
+                        <span x-show="logoUploading">Đang tải...</span>
+                    </button>
+                </div>
+            </div>
+            <input type="file" x-ref="logoInput" class="hidden" accept="image/*" @change="uploadLogo">
+            
+            <div class="w-full mt-2">
+                <label class="block text-sm font-medium text-slate-300 mb-1 text-left">Tên Thương hiệu</label>
+                <input type="text" class="form-input w-full" x-model="brandProfile.brand_name" placeholder="VD: DAFA Glass">
+            </div>
+        </div>
+
+        <!-- Brand Context -->
+        <div class="glass-card p-6 lg:col-span-2">
+            <div class="mb-4 flex justify-between items-center">
+                <h2 class="text-lg font-heading font-semibold text-white">Định vị & Văn phong</h2>
+                <button class="btn btn-primary px-4 py-1.5 text-sm" @click="saveBrandProfile()" :disabled="saving">
+                    <span x-show="!saving">Lưu thay đổi</span>
+                    <span x-show="saving">Đang lưu...</span>
+                </button>
+            </div>
+            
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-sm font-medium text-slate-300 mb-1">Tone of Voice (Giọng văn)</label>
+                    <input type="text" class="form-input w-full" x-model="brandProfile.tone_of_voice" placeholder="VD: Chuyên nghiệp, đẳng cấp...">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-slate-300 mb-1">Target Audience (Khách hàng mục tiêu)</label>
+                    <input type="text" class="form-input w-full" x-model="brandProfile.target_audience" placeholder="VD: Chủ nhà 30-50 tuổi...">
+                </div>
+                <div class="md:col-span-2">
+                    <label class="block text-sm font-medium text-slate-300 mb-1">Core Values (Giá trị cốt lõi)</label>
+                    <textarea class="form-input w-full h-16" x-model="brandProfile.core_values" placeholder="Nhập những điểm mạnh nổi bật của thương hiệu..."></textarea>
+                </div>
+                <div class="md:col-span-2">
+                    <label class="block text-sm font-medium text-slate-300 mb-1">Product Knowledge (Mô tả chung)</label>
+                    <textarea class="form-input w-full h-20" x-model="brandProfile.product_knowledge" placeholder="Mô tả tổng quan về doanh nghiệp..."></textarea>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- CONTACT INFO SECTION -->
+    <div class="glass-card p-6">
+        <h2 class="text-lg font-heading font-semibold text-white mb-4">Thông tin Liên hệ (Dành cho AI viết CTA)</h2>
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div>
+                <label class="block text-sm font-medium text-slate-300 mb-1">Hotline / Zalo</label>
+                <input type="text" class="form-input w-full" x-model="brandProfile.hotline" placeholder="VD: 098.xxx.yyyy">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-slate-300 mb-1">Email liên hệ</label>
+                <input type="email" class="form-input w-full" x-model="brandProfile.email" placeholder="VD: contact@dafaglass.com">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-slate-300 mb-1">Website</label>
+                <input type="text" class="form-input w-full" x-model="brandProfile.website" placeholder="VD: https://dafaglass.com">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-slate-300 mb-1">Địa chỉ / Showroom</label>
+                <input type="text" class="form-input w-full" x-model="brandProfile.address" placeholder="VD: 123 Đường ABC, Quận XYZ...">
+            </div>
+        </div>
+    </div>
+
+    <!-- PRODUCTS MANAGEMENT -->
+    <div class="glass-card p-6">
+        <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
+            <div>
+                <h2 class="text-xl font-heading font-semibold text-white mb-1">Danh sách Sản phẩm / Dịch vụ</h2>
+                <p class="text-sm text-slate-400">Tạo thư mục cho từng sản phẩm và tải ảnh lên để AI có tư liệu tham khảo.</p>
+            </div>
+            <div class="flex gap-2">
+                <input type="text" class="form-input text-sm w-48" placeholder="Tên sản phẩm mới..." x-model="newFolderName" @keyup.enter="createFolder">
+                <button class="btn btn-secondary whitespace-nowrap" @click="createFolder()" :disabled="creatingFolder || !newFolderName.trim()">
+                    <span x-show="!creatingFolder">+ Tạo thư mục</span>
+                    <span x-show="creatingFolder">...</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- Folders Grid -->
+        <div class="space-y-6">
+            <template x-if="folders.length === 0">
+                <div class="text-center py-10 border border-dashed border-slate-700 rounded-xl bg-white/[0.01]">
+                    <p class="text-slate-400">Chưa có thư mục sản phẩm nào. Hãy tạo mới ở bên trên.</p>
+                </div>
+            </template>
+            
+            <template x-for="folder in folders" :key="folder.folder_name">
+                <div class="border border-slate-700 rounded-xl overflow-hidden bg-white/[0.02]">
+                    <!-- Folder Header -->
+                    <div class="bg-white/[0.03] px-4 py-3 flex justify-between items-center border-b border-slate-700">
+                        <div class="flex items-center gap-2">
+                            <svg class="w-5 h-5 text-amber-400" fill="currentColor" viewBox="0 0 20 20"><path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z"></path></svg>
+                            <h3 class="font-semibold text-white" x-text="folder.folder_name"></h3>
+                            <span class="text-xs text-slate-400 ml-2 bg-slate-800 px-2 py-0.5 rounded-full" x-text="folder.images.length + ' ảnh'"></span>
+                        </div>
+                        <div class="flex gap-2">
+                            <button class="text-xs text-teal-400 hover:text-teal-300 px-2 py-1 flex items-center gap-1" @click="triggerUpload(folder.folder_name)">
+                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
+                                Upload ảnh
+                            </button>
+                            <input type="file" :id="'upload-' + folder.folder_name" class="hidden" multiple accept="image/*" @change="uploadImages($event, folder.folder_name)">
+                            
+                            <button class="text-xs text-red-400 hover:text-red-300 px-2 py-1" @click="deleteFolder(folder.folder_name)">Xóa thư mục</button>
+                        </div>
+                    </div>
+                    
+                    <!-- Folder Images -->
+                    <div class="p-4">
+                        <template x-if="folder.images.length === 0">
+                            <p class="text-xs text-slate-500 italic">Thư mục trống. Hãy upload ảnh cho sản phẩm này.</p>
+                        </template>
+                        
+                        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
+                            <template x-for="img in folder.images" :key="img.filename">
+                                <div class="relative group aspect-square rounded-lg overflow-hidden border border-slate-700 bg-slate-800">
+                                    <img :src="img.url" class="w-full h-full object-cover">
+                                    <div class="absolute inset-0 bg-black/60 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                                        <button class="w-8 h-8 rounded-full bg-red-500/20 text-red-500 flex items-center justify-center hover:bg-red-500 hover:text-white transition-colors" @click="deleteImage(folder.folder_name, img.filename)">
+                                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                                        </button>
+                                    </div>
+                                </div>
+                            </template>
+                        </div>
+                    </div>
+                    
+                    <!-- Folder Description -->
+                    <div class="p-4 border-t border-slate-700 bg-white/[0.01]">
+                        <label class="block text-sm font-medium text-slate-300 mb-2">Thông tin tham khảo cho AI (Mô tả sản phẩm, thông số...)</label>
+                        <textarea class="form-input w-full h-24 text-sm" placeholder="Nhập thông số kỹ thuật, mô tả chi tiết sản phẩm để AI học..." x-model="folder.description"></textarea>
+                        <div class="mt-2 flex justify-end">
+                            <button class="btn btn-primary py-1.5 px-4 text-xs" @click="saveFolderDescription(folder)">
+                                <span x-show="!folder._savingDesc">Lưu mô tả</span>
+                                <span x-show="folder._savingDesc">Đang lưu...</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </template>
+        </div>
+    </div>
+</div>
+
+<script>
+function brandProfileApp() {
+    return {
+        brandProfile: { brand_name: '', tone_of_voice: '', target_audience: '', core_values: '', product_knowledge: '' },
+        saving: false,
+        
+        logoInfo: { logo_url: null, exists: false },
+        logoUploading: false,
+        
+        folders: [],
+        newFolderName: '',
+        creatingFolder: false,
+        
+        async init() {
+            await Promise.all([
+                this.loadBrandProfile(),
+                this.loadLogo(),
+                this.loadFolders()
+            ]);
+        },
+        
+        async loadBrandProfile() {
+            try {
+                const res = await fetch('/api/v1/brand/');
+                if (res.ok) {
+                    this.brandProfile = await res.json();
+                }
+            } catch (err) {
+                console.error('Lỗi tải brand profile:', err);
+            }
+        },
+        
+        async saveBrandProfile() {
+            this.saving = true;
+            try {
+                const res = await fetch('/api/v1/brand/', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(this.brandProfile)
+                });
+                if (!res.ok) throw new Error('Lỗi cập nhật');
+                this.brandProfile = await res.json();
+                window.showToast('Lưu thông tin thương hiệu thành công!', 'success');
+            } catch (err) {
+                window.showToast(err.message, 'error');
+            } finally {
+                this.saving = false;
+            }
+        },
+        
+        async loadLogo() {
+            try {
+                const res = await fetch('/api/v1/image-gen/logo');
+                if (res.ok) this.logoInfo = await res.json();
+            } catch (err) {}
+        },
+        
+        async uploadLogo(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            this.logoUploading = true;
+            const formData = new FormData();
+            formData.append('file', file);
+            try {
+                const res = await fetch('/api/v1/image-gen/logo', { method: 'POST', body: formData });
+                if (!res.ok) throw new Error('Upload failed');
+                await this.loadLogo();
+                window.showToast('Cập nhật Logo thành công', 'success');
+            } catch (err) {
+                window.showToast('Lỗi upload Logo', 'error');
+            } finally {
+                this.logoUploading = false;
+                event.target.value = '';
+            }
+        },
+        
+        async loadFolders() {
+            try {
+                const res = await fetch('/api/v1/image-gen/products-folders');
+                if (res.ok) {
+                    const data = await res.json();
+                    this.folders = data.folders || [];
+                }
+            } catch (err) {}
+        },
+        
+        async createFolder() {
+            if (!this.newFolderName.trim()) return;
+            this.creatingFolder = true;
+            try {
+                const res = await fetch('/api/v1/image-gen/products-folders', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ folder_name: this.newFolderName })
+                });
+                
+                if (!res.ok) {
+                    const error = await res.json();
+                    throw new Error(error.detail || 'Lỗi tạo thư mục');
+                }
+                
+                await this.loadFolders();
+                this.newFolderName = '';
+                window.showToast('Tạo thư mục thành công', 'success');
+            } catch (err) {
+                window.showToast(err.message, 'error');
+            } finally {
+                this.creatingFolder = false;
+            }
+        },
+        
+        async saveFolderDescription(folder) {
+            folder._savingDesc = true;
+            try {
+                const res = await fetch('/api/v1/image-gen/products-folders/' + folder.folder_name + '/description', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ description: folder.description || '' })
+                });
+                if (!res.ok) throw new Error('Lỗi lưu mô tả');
+                window.showToast('Đã lưu mô tả sản phẩm', 'success');
+            } catch (err) {
+                window.showToast(err.message, 'error');
+            } finally {
+                folder._savingDesc = false;
+            }
+        },
+        
+        async deleteFolder(folderName) {
+            if (!confirm(`Xóa toàn bộ thư mục "${folderName}" và tất cả ảnh bên trong?`)) return;
+            try {
+                const res = await fetch(`/api/v1/image-gen/products-folders/${folderName}`, { method: 'DELETE' });
+                if (!res.ok) throw new Error('Lỗi xóa thư mục');
+                await this.loadFolders();
+                window.showToast('Đã xóa thư mục', 'success');
+            } catch (err) {
+                window.showToast(err.message, 'error');
+            }
+        },
+        
+        triggerUpload(folderName) {
+            document.getElementById('upload-' + folderName).click();
+        },
+        
+        async uploadImages(event, folderName) {
+            const files = event.target.files;
+            if (!files || files.length === 0) return;
+            
+            const formData = new FormData();
+            for (let i = 0; i < files.length; i++) {
+                formData.append('files', files[i]);
+            }
+            
+            try {
+                const res = await fetch(`/api/v1/image-gen/products-folders/${folderName}/images`, {
+                    method: 'POST',
+                    body: formData
+                });
+                if (!res.ok) throw new Error('Lỗi upload ảnh');
+                await this.loadFolders();
+                window.showToast(`Đã upload ${files.length} ảnh`, 'success');
+            } catch (err) {
+                window.showToast(err.message, 'error');
+            } finally {
+                event.target.value = '';
+            }
+        },
+        
+        async deleteImage(folderName, filename) {
+            if (!confirm('Xóa ảnh này khỏi thư mục?')) return;
+            try {
+                const res = await fetch(`/api/v1/image-gen/products-folders/${folderName}/images/${filename}`, {
+                    method: 'DELETE'
+                });
+                if (!res.ok) throw new Error('Lỗi xóa ảnh');
+                await this.loadFolders();
+            } catch (err) {
+                window.showToast(err.message, 'error');
+            }
+        }
+    }
+}
+</script>
+{% endblock %}

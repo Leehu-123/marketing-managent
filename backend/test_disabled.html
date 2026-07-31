@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+</head>
+<body>
+    <div x-data="{ test: {} }">
+        <button id="btn1" :disabled="test[1]">Button 1</button>
+        <button id="btn2" :disabled="test[2] || false">Button 2</button>
+        <button id="btn3" :disabled="!!test[3]">Button 3</button>
+    </div>
+    <script>
+        setTimeout(() => {
+            console.log("btn1 disabled:", document.getElementById("btn1").disabled);
+            console.log("btn2 disabled:", document.getElementById("btn2").disabled);
+            console.log("btn3 disabled:", document.getElementById("btn3").disabled);
+        }, 1000);
+    </script>
+</body>
+</html>

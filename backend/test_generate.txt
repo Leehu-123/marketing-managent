@@ -1,0 +1,17 @@
+315: async generateSlotImage(slot) {
+318: const res = await fetch(`/api/v1/posts/${this.selectedPost.id}/generate-slot-image`, {
+328: throw new Error(err.detail || 'Tạo ảnh thất bại');
+332: window.showToast(`Đã tạo ảnh cho vị trí #${slot.index}`, 'success');
+335: window.showToast(err.message || 'Không thể tạo ảnh', 'error');
+374: async aiGenerateImage() {
+383: const res = await fetch(`/api/v1/image-gen/posts/${this.selectedPost.id}/generate`, {
+390: throw new Error(err.detail || 'Tạo ảnh thất bại');
+397: window.showToast('AI đã tạo ảnh thành công!', 'success');
+399: console.error('AI generate image error:', err);
+400: window.showToast(err.message || 'Không thể tạo ảnh AI', 'error');
+850: <!-- AI Tạo ảnh tự động -->
+860: @click="if(!showPromptEditor) previewImagePrompt(); aiGenerateImage()"
+868: <span x-text="aiGeneratingImage ? 'Đang tạo...' : '🤖 AI Tạo ảnh'"></span>
+900: <p class="text-[9px] text-slate-500 italic">Lưu ý: Bạn có thể sửa các nội dung này trước khi bấm "AI Tạo ảnh". Ảnh sẽ tự động được ghép thêm logo và các nội dung trên.</p>
+957: @click="generateSlotImage(slot)"
+962: <span x-text="slotGenerating[slot.index] ? 'Đang tạo...' : '🎨 Generate ảnh'"></span>
