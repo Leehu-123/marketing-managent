@@ -505,12 +505,24 @@ def start_tool(req: ToolStartRequest):
             return {"status": "running", "message": "Tool đang chạy rồi!"}
             
     current_dir = os.path.dirname(os.path.abspath(__file__))
-    project_root = os.path.abspath(os.path.join(current_dir, "../../../../"))
+    project_root = os.path.abspath(os.path.join(current_dir, "../../../"))
     
-    # Ưu tiên client_automation trong project_root, nếu không có thì thử /var/www/client_automation
-    client_dir = os.path.join(project_root, "client_automation")
-    if not os.path.exists(client_dir) and os.path.exists("/var/www/client_automation"):
-        client_dir = "/var/www/client_automation"
+    # Tìm client_automation theo các đường dẫn khả thi
+    client_dir_candidates = [
+        os.path.join(project_root, "client_automation"),
+        "/app/client_automation",
+        "/var/www/marketing-management/client_automation",
+        "/var/www/client_automation",
+    ]
+    
+    client_dir = None
+    for cd in client_dir_candidates:
+        if os.path.exists(cd):
+            client_dir = cd
+            break
+            
+    if not client_dir:
+        client_dir = os.path.join(project_root, "client_automation")
         
     main_script = os.path.join(client_dir, "main.py")
     
@@ -518,8 +530,8 @@ def start_tool(req: ToolStartRequest):
     python_candidates = [
         os.path.join(client_dir, "venv", "Scripts", "python.exe"),
         os.path.join(client_dir, "venv", "bin", "python"),
-        os.path.join(project_root, "backend", "venv", "Scripts", "python.exe"),
-        os.path.join(project_root, "backend", "venv", "bin", "python"),
+        os.path.join(project_root, "venv", "Scripts", "python.exe"),
+        os.path.join(project_root, "venv", "bin", "python"),
         sys.executable,
         "/usr/bin/python3",
         "/usr/local/bin/python"
