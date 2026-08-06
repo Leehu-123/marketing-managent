@@ -58,3 +58,6 @@ uvicorn==0.49.0
 passlib[bcrypt]==1.7.4
 PyJWT==2.10.1
 replicate==1.0.7
+playwright
+playwright-stealth
+rich

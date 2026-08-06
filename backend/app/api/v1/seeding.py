@@ -503,23 +503,35 @@ def start_tool(req: ToolStartRequest):
         if client_tool_process.poll() is None:
             return {"status": "running", "message": "Tool đang chạy rồi!"}
             
-    import platform
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.abspath(os.path.join(current_dir, "../../../../"))
     
-    # Xác định đường dẫn tuỳ theo hệ điều hành (Windows vs Linux)
-    if platform.system() == "Windows":
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        project_root = os.path.abspath(os.path.join(current_dir, "../../../../"))
-        client_dir = os.path.join(project_root, "client_automation")
-        python_exe = os.path.join(client_dir, "venv", "Scripts", "python.exe")
-    else:
-        # Trên VPS (Linux)
+    # Ưu tiên client_automation trong project_root, nếu không có thì thử /var/www/client_automation
+    client_dir = os.path.join(project_root, "client_automation")
+    if not os.path.exists(client_dir) and os.path.exists("/var/www/client_automation"):
         client_dir = "/var/www/client_automation"
-        python_exe = os.path.join(client_dir, "venv", "bin", "python")
-    
+        
     main_script = os.path.join(client_dir, "main.py")
     
-    if not os.path.exists(python_exe):
-        return {"status": "error", "message": f"Chưa cài đặt Python env cho Client Tool tại: {python_exe}"}
+    # Danh sách ứng viên Python executable
+    python_candidates = [
+        os.path.join(client_dir, "venv", "Scripts", "python.exe"),
+        os.path.join(client_dir, "venv", "bin", "python"),
+        os.path.join(project_root, "backend", "venv", "Scripts", "python.exe"),
+        os.path.join(project_root, "backend", "venv", "bin", "python"),
+        sys.executable,
+        "/usr/bin/python3",
+        "/usr/local/bin/python"
+    ]
+    
+    python_exe = None
+    for cand in python_candidates:
+        if cand and os.path.exists(cand):
+            python_exe = cand
+            break
+            
+    if not python_exe or not os.path.exists(main_script):
+        return {"status": "error", "message": f"Chưa tìm thấy môi trường Python phù hợp cho Client Tool tại: {client_dir}"}
         
     cmd = [python_exe, main_script, "--platform", req.platform]
     if req.show_browser:
@@ -529,11 +541,12 @@ def start_tool(req: ToolStartRequest):
         # Popen without waiting
         env = os.environ.copy()
         env["PYTHONIOENCODING"] = "utf-8"
+        creationflags = subprocess.CREATE_NEW_CONSOLE if (sys.platform == "win32" and req.show_browser) else 0
         client_tool_process = subprocess.Popen(
             cmd,
             cwd=client_dir,
             env=env,
-            creationflags=subprocess.CREATE_NEW_CONSOLE if req.show_browser else 0
+            creationflags=creationflags
         )
         return {"status": "success", "message": "Đã khởi động Tool Automation!"}
     except Exception as e:
