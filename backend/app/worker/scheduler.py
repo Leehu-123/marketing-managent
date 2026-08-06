@@ -166,6 +166,91 @@ async def _publish_due_videos():
     finally:
         db.close()
 
+async def _create_daily_seeding_tasks():
+    """Tạo batch seeding tasks cho các chiến dịch có lịch đăng hàng ngày."""
+    db = SessionLocal()
+    now = datetime.now()
+    current_time = now.strftime("%H:%M")
+    today_str = now.strftime("%Y-%m-%d")
+    
+    try:
+        from app.models.seeding_campaign import SeedingCampaign
+        from app.models.seeding_task import SeedingTask
+        from app.models.seeding_account import SeedingAccount
+        import json
+        
+        # Tìm các campaign có lịch đăng hàng ngày
+        daily_campaigns = db.query(SeedingCampaign).filter(
+            SeedingCampaign.is_daily_repeat == True,
+            SeedingCampaign.daily_schedule_time != None,
+            SeedingCampaign.status.in_(["pending", "running", "completed"])
+        ).all()
+        
+        for campaign in daily_campaigns:
+            schedule_time = campaign.daily_schedule_time  # VD: "08:30"
+            if not schedule_time:
+                continue
+                
+            # Chỉ chạy nếu đúng giờ (trong khoảng 1 phút)
+            if current_time != schedule_time:
+                continue
+            
+            # Kiểm tra đã tạo task hôm nay chưa (tránh trùng lặp)
+            existing_today = db.query(SeedingTask).filter(
+                SeedingTask.campaign_id == campaign.id,
+                SeedingTask.created_at >= datetime.strptime(today_str, "%Y-%m-%d")
+            ).first()
+            
+            if existing_today:
+                continue  # Đã tạo hôm nay rồi
+            
+            # Tạo tasks mới
+            urls = []
+            if campaign.target_urls:
+                try:
+                    urls = json.loads(campaign.target_urls)
+                except Exception:
+                    continue
+            
+            acc_ids = []
+            if campaign.account_ids:
+                try:
+                    acc_ids = json.loads(campaign.account_ids)
+                except Exception:
+                    pass
+            
+            for url in urls:
+                if acc_ids:
+                    for acc_id in acc_ids:
+                        task = SeedingTask(
+                            campaign_id=campaign.id,
+                            account_id=acc_id,
+                            target_url=url,
+                            task_type=campaign.campaign_type,
+                            media_urls=campaign.media_urls,
+                            status="pending"
+                        )
+                        db.add(task)
+                else:
+                    task = SeedingTask(
+                        campaign_id=campaign.id,
+                        target_url=url,
+                        task_type=campaign.campaign_type,
+                        media_urls=campaign.media_urls,
+                        status="pending"
+                    )
+                    db.add(task)
+            
+            campaign.status = "pending"  # Reset để tool có thể pick up
+            logger.info(f"[SCHEDULER] Created daily seeding tasks for campaign #{campaign.id} '{campaign.name}'")
+        
+        db.commit()
+    except Exception as exc:
+        logger.error(f"[SCHEDULER] Error in _create_daily_seeding_tasks: {exc}")
+        db.rollback()
+    finally:
+        db.close()
+
 
 
 
@@ -197,6 +282,14 @@ def start_scheduler() -> AsyncIOScheduler:
         trigger=IntervalTrigger(seconds=60),
         id="publish_due_videos",
         name="Publish scheduled videos",
+        replace_existing=True,
+        max_instances=1,
+    )
+    _scheduler.add_job(
+        _create_daily_seeding_tasks,
+        trigger=IntervalTrigger(seconds=60),
+        id="create_daily_seeding_tasks",
+        name="Create daily seeding tasks on schedule",
         replace_existing=True,
         max_instances=1,
     )

@@ -53,16 +53,18 @@ async def execute_post_task(context: BrowserContext, task: Dict, api: APIClient,
         group_info = await scrape_group_info(page)
         print(f"    📝 Group: {group_info[:60]}...")
         
-        # --- Bước 4: Gọi AI sinh nội dung bài viết ---
-        print(f"    🤖 Đang gọi AI sinh nội dung bài viết...")
-        post_prompt = f"Tên Group/Chủ đề: {group_info}\n\nYêu cầu: {ai_instructions}"
-        
-        generated_post = api.generate_content(
-            post_content=post_prompt,
-            instruction=ai_instructions,
-            platform=task.get("platform", "facebook"),
-            task_type="POST_GROUP"
-        )
+        # --- Bước 4: Dùng nội dung soạn sẵn hoặc gọi AI sinh ---
+        generated_post = task.get("post_content") or task.get("generated_content")
+        if not generated_post:
+            print(f"    🤖 Đang gọi AI sinh nội dung bài viết...")
+            post_prompt = f"Tên Group/Chủ đề: {group_info}\n\nYêu cầu: {ai_instructions}"
+            
+            generated_post = api.generate_content(
+                post_content=post_prompt,
+                instruction=ai_instructions,
+                platform=task.get("platform", "facebook"),
+                task_type="POST_GROUP"
+            )
         
         if not generated_post:
             result["error"] = "AI không trả về nội dung bài viết"
@@ -78,7 +80,15 @@ async def execute_post_task(context: BrowserContext, task: Dict, api: APIClient,
             return result
         
         # --- Bước 6: Tìm form đăng bài và điền nội dung ---
-        post_success = await submit_post(page, generated_post)
+        media_urls = []
+        if task.get("media_urls"):
+            import json as json_mod
+            try:
+                media_urls = json_mod.loads(task["media_urls"]) if isinstance(task["media_urls"], str) else task["media_urls"]
+            except Exception:
+                media_urls = []
+        
+        post_success = await submit_post(page, generated_post, media_urls=media_urls)
         
         if post_success:
             result["status"] = "success"
@@ -144,7 +154,7 @@ async def scrape_group_info(page: Page) -> str:
         return "Group Facebook"
 
 
-async def submit_post(page: Page, post_content: str) -> bool:
+async def submit_post(page: Page, post_content: str, media_urls: list = None) -> bool:
     """Tìm form đăng bài trong Group trên mbasic và đăng."""
     
     # Trên mbasic, form đăng bài có textarea hoặc link "Đăng bài"
@@ -203,6 +213,58 @@ async def submit_post(page: Page, post_content: str) -> bool:
         chunk = post_content[i:i+chunk_size]
         await post_input.type(chunk, delay=random.uniform(30, 100))
         await asyncio.sleep(random.uniform(0.05, 0.2))
+    
+    # --- Upload media nếu có ---
+    if media_urls:
+        print(f"    📎 Đang đính kèm {len(media_urls)} file media...")
+        
+        # Tìm nút thêm ảnh/video trên mbasic
+        media_selectors = [
+            "input[type='file'][name='file1']",
+            "input[type='file'][accept*='image']",
+            "input[type='file'][accept*='video']",
+            "input[type='file']",
+        ]
+        
+        for media_url in media_urls:
+            # Tải file từ backend
+            try:
+                import httpx
+                import tempfile
+                import os
+                
+                # Nếu là URL relative, thêm backend URL
+                if media_url.startswith("/"):
+                    from config import BACKEND_URL
+                    full_url = f"{BACKEND_URL}{media_url}"
+                else:
+                    full_url = media_url
+                
+                async with httpx.AsyncClient() as client:
+                    resp = await client.get(full_url)
+                    if resp.status_code == 200:
+                        # Lưu vào temp file
+                        ext = os.path.splitext(media_url)[1] or ".jpg"
+                        tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=ext)
+                        tmp_file.write(resp.content)
+                        tmp_file.close()
+                        
+                        # Tìm input file và set
+                        for sel in media_selectors:
+                            file_input = await page.query_selector(sel)
+                            if file_input:
+                                await file_input.set_input_files(tmp_file.name)
+                                await random_delay(2, 4)
+                                print(f"    ✅ Đã đính kèm: {media_url}")
+                                break
+                        
+                        # Cleanup temp file
+                        try:
+                            os.unlink(tmp_file.name)
+                        except Exception:
+                            pass
+            except Exception as e:
+                print(f"    ⚠️ Không thể đính kèm media {media_url}: {e}")
     
     await random_delay(2, 4)
     

@@ -12,7 +12,12 @@
         platform: 'facebook',
         campaign_type: 'COMMENT',
         target_urls: '',
-        ai_instructions: 'Hãy đóng vai một khách hàng đang tìm hiểu sản phẩm nội thất, vào khen hoặc hỏi han rất tự nhiên, tuyệt đối không lộ là seeder.'
+        ai_instructions: 'Hãy đóng vai một khách hàng đang tìm hiểu sản phẩm nội thất, vào khen hoặc hỏi han rất tự nhiên, tuyệt đối không lộ là seeder.',
+        post_content: '',
+        media_urls: [],
+        daily_schedule_time: '',
+        is_daily_repeat: false,
+        account_ids: [],
     },
     
     editingId: null,
@@ -119,7 +124,7 @@
     
     openAddModal() {
         this.editingId = null;
-        this.newCampaign = {name: '', platform: 'facebook', campaign_type: 'COMMENT', target_urls: '', ai_instructions: '', account_ids: []};
+        this.newCampaign = {name: '', platform: 'facebook', campaign_type: 'COMMENT', target_urls: '', ai_instructions: '', account_ids: [], post_content: '', media_urls: [], daily_schedule_time: '', is_daily_repeat: false};
         this.showModal = true;
     },
     
@@ -144,7 +149,11 @@
             campaign_type: camp.campaign_type,
             target_urls: urls,
             ai_instructions: camp.ai_instructions || '',
-            account_ids: accIds
+            post_content: camp.post_content || '',
+            daily_schedule_time: camp.daily_schedule_time || '',
+            is_daily_repeat: camp.is_daily_repeat || false,
+            media_urls: camp.media_urls ? (typeof camp.media_urls === 'string' ? JSON.parse(camp.media_urls) : camp.media_urls) : [],
+            account_ids: accIds,
         };
         this.showModal = true;
     },
@@ -156,7 +165,12 @@
         }
         try {
             let urls = this.newCampaign.target_urls.split('\n').map(u => u.trim()).filter(u => u);
-            let payload = {...this.newCampaign, target_urls: JSON.stringify(urls), account_ids: JSON.stringify(this.newCampaign.account_ids)};
+            let payload = {
+                ...this.newCampaign,
+                target_urls: JSON.stringify(urls),
+                account_ids: JSON.stringify(this.newCampaign.account_ids),
+                media_urls: JSON.stringify(this.newCampaign.media_urls)
+            };
             
             const url = this.editingId ? `/api/v1/seeding/campaigns/${this.editingId}` : '/api/v1/seeding/campaigns';
             const method = this.editingId ? 'PUT' : 'POST';
@@ -189,6 +203,58 @@
                 await this.loadCampaigns();
             } else {
                 window.showToast('Lỗi khi xoá chiến dịch', 'error');
+            }
+        } catch (e) {
+            window.showToast('Lỗi kết nối', 'error');
+        }
+    },
+    
+    async uploadMedia(event) {
+        const files = event.target.files;
+        if (!files.length) return;
+        
+        const formData = new FormData();
+        for (let f of files) {
+            formData.append('files', f);
+        }
+        
+        try {
+            const res = await fetch('/api/v1/seeding/upload-media', {
+                method: 'POST',
+                body: formData
+            });
+            if (res.ok) {
+                const data = await res.json();
+                this.newCampaign.media_urls = [...this.newCampaign.media_urls, ...data.urls];
+                window.showToast(`Đã upload ${data.urls.length} file`);
+            } else {
+                window.showToast('Lỗi upload media', 'error');
+            }
+        } catch (e) {
+            window.showToast('Lỗi kết nối', 'error');
+        }
+    },
+    
+    removeMedia(index) {
+        this.newCampaign.media_urls.splice(index, 1);
+    },
+    
+    async generateReplies(campId) {
+        if (!campId) {
+            window.showToast('Vui lòng lưu chiến dịch trước', 'error');
+            return;
+        }
+        window.showToast('Đang sinh kịch bản reply chéo...', 'info');
+        try {
+            const res = await fetch(`/api/v1/seeding/campaigns/${campId}/generate-replies`, {
+                method: 'POST'
+            });
+            const data = await res.json();
+            if (res.ok) {
+                window.showToast(data.message || 'Đã sinh kịch bản thành công!');
+                await this.loadCampaigns();
+            } else {
+                window.showToast(data.detail || 'Lỗi khi sinh kịch bản', 'error');
             }
         } catch (e) {
             window.showToast('Lỗi kết nối', 'error');
@@ -237,7 +303,15 @@
             <div class="bg-surface-secondary border border-slate-700/50 rounded-xl p-5 hover:border-slate-500 transition">
                 <div class="flex justify-between items-start mb-3">
                     <h3 class="font-semibold text-white text-lg" x-text="camp.name"></h3>
-                    <span class="px-2 py-0.5 text-xs rounded bg-slate-800 text-slate-300" x-text="camp.platform"></span>
+                    <div class="flex items-center gap-1.5">
+                        <span class="px-2 py-0.5 text-xs rounded bg-slate-800 text-slate-300" x-text="camp.platform"></span>
+                        <span class="px-2 py-0.5 text-xs rounded" :class="{
+                            'bg-blue-500/10 text-blue-400': camp.campaign_type === 'COMMENT',
+                            'bg-purple-500/10 text-purple-400': camp.campaign_type === 'REPLY_COMMENT',
+                            'bg-amber-500/10 text-amber-400': camp.campaign_type === 'POST_GROUP'
+                        }" x-text="{'COMMENT': '💬 Comment', 'REPLY_COMMENT': '↩️ Reply', 'POST_GROUP': '📢 Nhóm'}[camp.campaign_type] || camp.campaign_type"></span>
+                        <span x-show="camp.is_daily_repeat" class="px-2 py-0.5 text-xs rounded bg-emerald-500/10 text-emerald-400">🔄 <span x-text="camp.daily_schedule_time"></span></span>
+                    </div>
                 </div>
                 <div class="text-sm text-slate-400 mb-4 line-clamp-2" x-text="camp.ai_instructions"></div>
                 
@@ -264,6 +338,7 @@
                     <div class="flex items-center gap-2">
                         <button x-show="camp.status === 'failed'" @click="viewTasks(camp)" class="text-xs text-rose-400 hover:text-rose-300 font-medium px-2 py-1 rounded bg-rose-500/10 transition flex items-center gap-1"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>Xem lỗi</button>
                         <button x-show="camp.status === 'pending' || camp.status === 'failed'" @click="editCampaign(camp)" class="text-xs text-rose-400 hover:text-rose-300 font-medium px-2 py-1 rounded bg-rose-500/10 transition">Sửa</button>
+                        <button x-show="camp.campaign_type === 'REPLY_COMMENT' && (camp.status === 'pending' || camp.status === 'failed')" @click="generateReplies(camp.id)" class="text-xs text-purple-400 hover:text-purple-300 font-medium px-2 py-1 rounded bg-purple-500/10 transition">🤖 Sinh Reply</button>
                         <button @click="deleteCampaign(camp.id)" class="text-xs text-slate-400 hover:text-red-400 font-medium px-2 py-1 rounded bg-slate-800 hover:bg-red-500/10 transition">Xoá</button>
                         <span class="px-2 py-1 rounded font-medium text-xs cursor-pointer" @click="viewTasks(camp)" :class="{
                             'bg-amber-500/10 text-amber-500': camp.status == 'pending',
@@ -341,8 +416,9 @@
                     <div>
                         <label class="block text-sm text-slate-400 mb-1">Loại Seeding</label>
                         <select x-model="newCampaign.campaign_type" class="w-full p-2 bg-surface-input border border-slate-700 rounded-lg focus:border-rose-500 outline-none text-white">
-                            <option value="COMMENT">Comment Dạo (Auto Sinh Comment)</option>
-                            <option value="POST_GROUP">Đăng bài Hội Nhóm</option>
+                            <option value="COMMENT">💬 Comment Dạo</option>
+                            <option value="REPLY_COMMENT">↩️ Reply Comment Chéo (Via đối thoại)</option>
+                            <option value="POST_GROUP">📢 Đăng bài Hội Nhóm</option>
                         </select>
                     </div>
                 </div>
@@ -373,6 +449,56 @@
                 <div>
                     <label class="block text-sm text-slate-400 mb-1">Chỉ thị cho AI (System Prompt)</label>
                     <textarea x-model="newCampaign.ai_instructions" class="w-full p-2 bg-surface-input border border-slate-700 rounded-lg focus:border-rose-500 outline-none text-white h-24" placeholder="Dặn dò AI cách xưng hô, kiểu comment..."></textarea>
+                </div>
+                
+                <!-- Nội dung bài đăng (POST_GROUP) -->
+                <div x-show="newCampaign.campaign_type === 'POST_GROUP'" x-transition>
+                    <label class="block text-sm text-slate-400 mb-1">📝 Nội dung bài đăng (tùy chọn, bỏ trống = AI tự sinh)</label>
+                    <textarea x-model="newCampaign.post_content" class="w-full p-2 bg-surface-input border border-slate-700 rounded-lg focus:border-rose-500 outline-none text-white h-28" placeholder="Soạn nội dung bài đăng nhóm tại đây..."></textarea>
+                </div>
+                
+                <!-- Upload Ảnh/Video (POST_GROUP) -->
+                <div x-show="newCampaign.campaign_type === 'POST_GROUP'" x-transition>
+                    <label class="block text-sm text-slate-400 mb-1">📎 Đính kèm Ảnh / Video</label>
+                    <div class="border-2 border-dashed border-slate-600 rounded-lg p-4 text-center hover:border-rose-500 transition cursor-pointer relative">
+                        <input type="file" multiple accept="image/*,video/*" @change="uploadMedia($event)" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer">
+                        <svg class="w-8 h-8 mx-auto text-slate-500 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path></svg>
+                        <p class="text-sm text-slate-400">Kéo thả hoặc click để chọn file</p>
+                        <p class="text-xs text-slate-500 mt-1">Hỗ trợ: JPG, PNG, MP4, MOV</p>
+                    </div>
+                    <!-- Preview uploaded files -->
+                    <div class="flex flex-wrap gap-2 mt-3" x-show="newCampaign.media_urls.length > 0">
+                        <template x-for="(url, idx) in newCampaign.media_urls" :key="idx">
+                            <div class="relative group">
+                                <img :src="url" class="w-16 h-16 object-cover rounded-lg border border-slate-600">
+                                <button @click="removeMedia(idx)" class="absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-500 rounded-full text-white text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition">×</button>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+                
+                <!-- Lịch đăng hàng ngày (POST_GROUP) -->
+                <div x-show="newCampaign.campaign_type === 'POST_GROUP'" x-transition>
+                    <div class="flex items-center gap-4">
+                        <div class="flex-1">
+                            <label class="block text-sm text-slate-400 mb-1">⏰ Giờ đăng hàng ngày</label>
+                            <input type="time" x-model="newCampaign.daily_schedule_time" class="w-full p-2 bg-surface-input border border-slate-700 rounded-lg focus:border-rose-500 outline-none text-white">
+                        </div>
+                        <div class="flex items-center gap-2 mt-5">
+                            <input type="checkbox" id="daily_repeat" x-model="newCampaign.is_daily_repeat" class="rounded border-slate-700 text-rose-500 focus:ring-rose-500 bg-surface-secondary">
+                            <label for="daily_repeat" class="text-sm text-slate-300 cursor-pointer">Tự động lặp lại hàng ngày</label>
+                        </div>
+                    </div>
+                    <p class="text-xs text-slate-500 mt-1">Hệ thống sẽ tự tạo task mới mỗi ngày vào giờ đã chọn</p>
+                </div>
+                
+                <!-- Nút sinh kịch bản Reply (REPLY_COMMENT) -->
+                <div x-show="newCampaign.campaign_type === 'REPLY_COMMENT' && editingId" x-transition>
+                    <button @click="generateReplies(editingId)" class="w-full py-3 bg-gradient-to-r from-purple-600 to-rose-600 hover:from-purple-700 hover:to-rose-700 text-white rounded-lg transition font-medium flex items-center justify-center gap-2">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"></path></svg>
+                        🤖 Sinh kịch bản Reply chéo giữa các Via
+                    </button>
+                    <p class="text-xs text-slate-500 mt-1">AI sẽ tạo chuỗi hội thoại tự nhiên: Via A comment → Via B reply → Via C bổ sung</p>
                 </div>
             </div>
             

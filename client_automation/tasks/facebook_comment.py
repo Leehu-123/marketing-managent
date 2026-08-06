@@ -300,3 +300,298 @@ def random_between(a: float, b: float) -> float:
     """Trả về số ngẫu nhiên giữa a và b."""
     import random
     return random.uniform(a, b)
+
+
+async def execute_reply_task(context: BrowserContext, task: Dict, api: APIClient, dry_run: bool = False) -> Dict:
+    """
+    Thực thi 1 task Reply Comment trên Facebook.
+    
+    Luồng:
+    1. Mở bài viết gốc
+    2. Tìm comment cha (dựa vào parent_comment_content)
+    3. Click nút Reply/Trả lời dưới comment đó
+    4. Điền nội dung reply (đã được AI sinh sẵn hoặc sinh realtime)
+    5. Gửi reply
+    """
+    page: Page = await context.new_page()
+    result = {"status": "failed", "content": "", "error": ""}
+    
+    try:
+        target_url = task["target_url"]
+        parent_comment = task.get("parent_comment_content", "")
+        generated_content = task.get("generated_content", "")
+        ai_instructions = task.get("ai_instructions", "Hãy reply tự nhiên, thân thiện.")
+        
+        # --- Bước 1: Truy cập bài viết ---
+        print(f"    📄 [REPLY] Truy cập: {target_url}")
+        await page.goto(target_url, wait_until="domcontentloaded")
+        await random_delay(3, 6)
+        
+        # Kiểm tra login
+        if "login" in page.url.lower() or "checkpoint" in page.url.lower():
+            result["error"] = "Cookie hết hạn hoặc tài khoản bị checkpoint"
+            return result
+        
+        # --- Bước 2: Tìm comment cha ---
+        print(f"    🔍 Tìm comment cha: {parent_comment[:50]}...")
+        
+        # Xác định search_root (dialog nếu có)
+        search_root = page
+        dialogs = await page.query_selector_all("div[role='dialog']")
+        if dialogs:
+            for dialog in reversed(dialogs):
+                box = await dialog.bounding_box()
+                if box and box['width'] > 200 and box['height'] > 200:
+                    search_root = dialog
+                    break
+        
+        parent_comment_el = await find_comment_element(search_root, parent_comment)
+        
+        if not parent_comment_el:
+            # Fallback: nếu không tìm thấy comment cha, comment bình thường
+            print(f"    ⚠️ Không tìm thấy comment cha, chuyển sang comment thường")
+            reply_content = generated_content
+            if not reply_content:
+                reply_content = api.generate_content(
+                    post_content=parent_comment or target_url,
+                    instruction=ai_instructions,
+                    platform=task.get("platform", "facebook"),
+                    task_type="COMMENT"
+                )
+            result["content"] = reply_content
+            
+            if dry_run:
+                result["status"] = "success"
+                return result
+            
+            comment_success = await submit_comment(page, target_url, reply_content)
+            if comment_success:
+                result["status"] = "success"
+            else:
+                result["error"] = "Không thể gửi comment fallback"
+            return result
+        
+        # --- Bước 3: Click nút Reply ---
+        print(f"    💬 Tìm thấy comment cha, đang click Reply...")
+        reply_clicked = await click_reply_button(parent_comment_el, page)
+        
+        if not reply_clicked:
+            result["error"] = "Không tìm thấy nút Reply dưới comment"
+            return result
+        
+        await random_delay(1, 3)
+        
+        # --- Bước 4: Sinh hoặc sử dụng nội dung reply ---
+        reply_content = generated_content
+        if not reply_content:
+            reply_content = api.generate_content(
+                post_content=parent_comment,
+                instruction=ai_instructions,
+                platform=task.get("platform", "facebook"),
+                task_type="REPLY_COMMENT"
+            )
+        
+        if not reply_content:
+            result["error"] = "AI không trả về nội dung reply"
+            return result
+        
+        print(f"    💬 Reply: {reply_content[:60]}...")
+        result["content"] = reply_content
+        
+        if dry_run:
+            print(f"    🔵 [DRY RUN] Bỏ qua gửi reply thực tế")
+            result["status"] = "success"
+            return result
+        
+        # --- Bước 5: Điền reply và gửi ---
+        reply_success = await submit_reply(page, search_root, reply_content)
+        
+        if reply_success:
+            result["status"] = "success"
+            print(f"    ✅ Reply thành công!")
+        else:
+            result["error"] = "Không thể gửi reply"
+            
+    except Exception as e:
+        result["error"] = str(e)
+        print(f"    ❌ Lỗi reply: {e}")
+    finally:
+        await page.close()
+    
+    return result
+
+
+async def find_comment_element(root, comment_text: str):
+    """Tìm element chứa comment có nội dung khớp (hoặc gần khớp) với comment_text."""
+    if not comment_text or len(comment_text.strip()) < 5:
+        return None
+    
+    # Lấy tất cả các comment blocks
+    comment_selectors = [
+        "div[role='article']",  # Desktop React comment blocks
+        "div[data-testid='UFI2Comment/body']",
+        "div.UFIComment",
+    ]
+    
+    search_text = comment_text.strip()[:80].lower()  # So sánh 80 ký tự đầu
+    
+    for selector in comment_selectors:
+        try:
+            elements = await root.query_selector_all(selector)
+            for el in elements:
+                text = await el.inner_text()
+                if search_text in text.lower():
+                    return el
+        except Exception:
+            continue
+    
+    # Fallback: tìm bất kỳ element nào chứa text
+    try:
+        all_divs = await root.query_selector_all("div")
+        for div in all_divs:
+            try:
+                text = await div.inner_text()
+                if len(text) < 500 and search_text in text.lower():
+                    # Kiểm tra xem div này có nhỏ gọn (là comment) không
+                    box = await div.bounding_box()
+                    if box and 50 < box['height'] < 400:
+                        return div
+            except Exception:
+                continue
+    except Exception:
+        pass
+    
+    return None
+
+
+async def click_reply_button(comment_el, page) -> bool:
+    """Tìm và click nút Reply/Trả lời bên dưới comment element."""
+    reply_selectors = [
+        # Desktop Facebook
+        "div[role='button'] span",
+        "a[role='button']",
+        "span[dir='auto']",
+    ]
+    
+    reply_keywords = ["reply", "trả lời", "phản hồi", "respond"]
+    
+    # Tìm trong comment element và vùng lân cận
+    try:
+        for selector in reply_selectors:
+            buttons = await comment_el.query_selector_all(selector)
+            for btn in buttons:
+                text = (await btn.inner_text()).strip().lower()
+                if any(kw in text for kw in reply_keywords):
+                    await btn.click()
+                    return True
+    except Exception:
+        pass
+    
+    # Fallback: tìm trên toàn trang trong vùng gần comment
+    try:
+        comment_box = await comment_el.bounding_box()
+        if comment_box:
+            # Tìm tất cả nút reply trên trang
+            all_buttons = await page.query_selector_all("div[role='button'], a[role='button'], span")
+            for btn in all_buttons:
+                try:
+                    text = (await btn.inner_text()).strip().lower()
+                    if any(kw in text for kw in reply_keywords):
+                        btn_box = await btn.bounding_box()
+                        if btn_box:
+                            # Chỉ click nếu nút nằm gần comment (cùng vùng Y)
+                            y_diff = abs(btn_box['y'] - (comment_box['y'] + comment_box['height']))
+                            if y_diff < 100:
+                                await btn.click()
+                                return True
+                except Exception:
+                    continue
+    except Exception:
+        pass
+    
+    return False
+
+
+async def submit_reply(page, search_root, reply_text: str) -> bool:
+    """Điền nội dung vào ô reply đang active và gửi."""
+    # Sau khi click Reply, Facebook mở ô nhập reply (thường là textbox mới focus)
+    await random_delay(1, 2)
+    
+    # Tìm ô nhập đang focus
+    reply_selectors = [
+        "div[role='textbox'][contenteditable='true']:focus",
+        "div[role='textbox'][contenteditable='true']",
+        "textarea:focus",
+        "textarea[name='comment_text']",  # mbasic
+    ]
+    
+    reply_input = None
+    for selector in reply_selectors:
+        try:
+            inputs = await search_root.query_selector_all(selector)
+            for inp in inputs:
+                box = await inp.bounding_box()
+                if box and box['width'] > 0 and box['height'] > 0:
+                    reply_input = inp
+                    break
+            if reply_input:
+                break
+        except Exception:
+            continue
+    
+    if not reply_input:
+        return False
+    
+    # Focus và nhập nội dung
+    try:
+        await reply_input.click(position={"x": 10, "y": 10})
+        await random_delay(0.5, 1)
+    except Exception:
+        pass
+    
+    # Gõ nội dung bằng clipboard paste
+    try:
+        await page.evaluate('''([el, text]) => {
+            const dataTransfer = new DataTransfer();
+            dataTransfer.setData('text/plain', text);
+            el.focus();
+            el.dispatchEvent(new ClipboardEvent('paste', {
+                clipboardData: dataTransfer,
+                bubbles: true,
+                cancelable: true
+            }));
+        }''', [reply_input, reply_text])
+    except Exception:
+        # Fallback: gõ từng ký tự
+        try:
+            await reply_input.type(reply_text, delay=50)
+        except Exception:
+            return False
+    
+    await random_delay(1, 2)
+    
+    # Nhấn Enter để gửi (Facebook Desktop)
+    try:
+        await page.keyboard.press("Enter")
+        await random_delay(2, 4)
+        return True
+    except Exception:
+        pass
+    
+    # Fallback: tìm nút submit (mbasic)
+    submit_selectors = [
+        "input[type='submit'][value*='Reply']",
+        "input[type='submit'][value*='Trả lời']",
+        "input[type='submit']",
+    ]
+    for sel in submit_selectors:
+        try:
+            btn = await search_root.query_selector(sel)
+            if btn:
+                await btn.click()
+                await random_delay(2, 4)
+                return True
+        except Exception:
+            continue
+    
+    return False

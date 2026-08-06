@@ -14,6 +14,9 @@ from app.schemas.seeding import (
 )
 from app.services.ai_service import generate_seeding_content
 import json
+import os
+from fastapi import UploadFile, File
+from typing import List as TypingList
 
 router = APIRouter()
 
@@ -161,14 +164,18 @@ def create_seeding_campaign(
                             campaign_id=campaign.id,
                             account_id=acc_id,
                             target_url=url,
-                            status="pending"
+                            status="pending",
+                            task_type=campaign.campaign_type,
+                            media_urls=campaign.media_urls
                         )
                         db.add(task)
                 else:
                     task = SeedingTask(
                         campaign_id=campaign.id,
                         target_url=url,
-                        status="pending"
+                        status="pending",
+                        task_type=campaign.campaign_type,
+                        media_urls=campaign.media_urls
                     )
                     db.add(task)
             db.commit()
@@ -234,14 +241,18 @@ def update_seeding_campaign(
                             campaign_id=campaign.id,
                             account_id=acc_id,
                             target_url=url,
-                            status="pending"
+                            status="pending",
+                            task_type=campaign.campaign_type,
+                            media_urls=campaign.media_urls
                         )
                         db.add(task)
                 else:
                     task = SeedingTask(
                         campaign_id=campaign.id,
                         target_url=url,
-                        status="pending"
+                        status="pending",
+                        task_type=campaign.campaign_type,
+                        media_urls=campaign.media_urls
                     )
                     db.add(task)
         except Exception:
@@ -268,6 +279,136 @@ def delete_seeding_campaign(
     db.delete(campaign)
     db.commit()
     return {"status": "success", "message": "Đã xoá chiến dịch"}
+
+@router.post("/upload-media")
+async def upload_seeding_media(
+    files: TypingList[UploadFile] = File(...),
+    current_user = Depends(get_current_user)
+):
+    """Upload ảnh/video cho bài đăng seeding. Trả về danh sách URL."""
+    upload_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../../uploads/seeding")
+    os.makedirs(upload_dir, exist_ok=True)
+    
+    uploaded_urls = []
+    for file in files:
+        # Tạo tên file unique
+        import uuid
+        ext = os.path.splitext(file.filename)[1] if file.filename else ".jpg"
+        filename = f"{uuid.uuid4().hex}{ext}"
+        filepath = os.path.join(upload_dir, filename)
+        
+        content = await file.read()
+        with open(filepath, "wb") as f:
+            f.write(content)
+        
+        uploaded_urls.append(f"/uploads/seeding/{filename}")
+    
+    return {"urls": uploaded_urls}
+
+@router.post("/campaigns/{campaign_id}/generate-replies")
+def generate_reply_thread(
+    campaign_id: int,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """Sinh kịch bản hội thoại reply chéo giữa các Via cho chiến dịch REPLY_COMMENT."""
+    campaign = db.query(SeedingCampaign).filter(SeedingCampaign.id == campaign_id).first()
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    
+    # Lấy danh sách account tham gia
+    acc_ids = []
+    if campaign.account_ids:
+        try:
+            acc_ids = json.loads(campaign.account_ids)
+        except Exception:
+            pass
+    
+    accounts = []
+    if acc_ids:
+        accounts = db.query(SeedingAccount).filter(SeedingAccount.id.in_(acc_ids)).all()
+    else:
+        accounts = db.query(SeedingAccount).filter(
+            SeedingAccount.platform == campaign.platform,
+            SeedingAccount.status == "active"
+        ).limit(5).all()
+    
+    if len(accounts) < 2:
+        raise HTTPException(status_code=400, detail="Cần ít nhất 2 tài khoản Via để tạo kịch bản reply chéo")
+    
+    # Lấy danh sách URL mục tiêu
+    urls = []
+    if campaign.target_urls:
+        try:
+            urls = json.loads(campaign.target_urls)
+        except Exception:
+            urls = [campaign.target_urls]
+    
+    if not urls:
+        raise HTTPException(status_code=400, detail="Chiến dịch chưa có URL mục tiêu")
+    
+    # Xoá tasks cũ nếu campaign đang pending
+    if campaign.status in ["pending", "failed"]:
+        db.query(SeedingTask).filter(SeedingTask.campaign_id == campaign.id).delete()
+    
+    # Sinh kịch bản reply cho mỗi URL
+    from app.services.ai_service import generate_seeding_content
+    
+    all_tasks = []
+    for url in urls:
+        # Bước 1: Via đầu tiên comment gốc
+        first_acc = accounts[0]
+        comment_content = generate_seeding_content(
+            target_content=url,
+            instructions=campaign.ai_instructions or "Comment tự nhiên như khách hàng thật",
+            platform=campaign.platform,
+            task_type="COMMENT"
+        )
+        
+        parent_task = SeedingTask(
+            campaign_id=campaign.id,
+            account_id=first_acc.id,
+            target_url=url,
+            task_type="COMMENT",
+            generated_content=comment_content,
+            status="pending"
+        )
+        db.add(parent_task)
+        db.flush()  # Lấy ID
+        all_tasks.append(parent_task)
+        
+        # Bước 2: Các Via còn lại reply chéo
+        prev_content = comment_content
+        for i, acc in enumerate(accounts[1:], start=1):
+            reply_instruction = f"Trả lời comment trước đó: '{prev_content[:100]}'. {campaign.ai_instructions or 'Hãy reply tự nhiên, thân thiện.'}"
+            reply_content = generate_seeding_content(
+                target_content=prev_content,
+                instructions=reply_instruction,
+                platform=campaign.platform,
+                task_type="REPLY_COMMENT"
+            )
+            
+            reply_task = SeedingTask(
+                campaign_id=campaign.id,
+                account_id=acc.id,
+                target_url=url,
+                task_type="REPLY_COMMENT",
+                parent_task_id=parent_task.id,
+                generated_content=reply_content,
+                status="pending"
+            )
+            db.add(reply_task)
+            all_tasks.append(reply_task)
+            prev_content = reply_content
+    
+    campaign.status = "pending"
+    db.commit()
+    
+    return {
+        "status": "success",
+        "message": f"Đã sinh {len(all_tasks)} task ({len(urls)} URL × {len(accounts)} Via)",
+        "tasks_count": len(all_tasks)
+    }
 
 # --- Tasks (For Automation Tool) ---
 
@@ -473,6 +614,13 @@ def fetch_tasks_for_client(
                 SeedingAccount.platform == platform,
                 SeedingAccount.status == "active"
             ).order_by(SeedingAccount.id).first()
+            
+        # Look up parent comment content if this is a reply task
+        parent_comment = None
+        if task.parent_task_id:
+            parent = db.query(SeedingTask).filter(SeedingTask.id == task.parent_task_id).first()
+            if parent:
+                parent_comment = parent.generated_content
         
         results.append(TaskWithDetails(
             id=task.id,
@@ -489,6 +637,11 @@ def fetch_tasks_for_client(
             account_cookies=acc.cookies if acc else None,
             account_proxy=acc.proxy if acc else None,
             account_two_fa_secret=acc.two_fa_secret if acc else None,
+            task_type=task.task_type or camp.campaign_type,
+            parent_task_id=task.parent_task_id,
+            parent_comment_content=parent_comment,
+            media_urls=task.media_urls or camp.media_urls,
+            post_content=camp.post_content,
         ))
     
     # Cập nhật campaign sang running nếu có task được fetch

@@ -1030,7 +1030,40 @@ def generate_seeding_content(target_content: str, instructions: str, platform: s
     if not provider_info:
         return "Tuyệt vời quá!" if task_type == "COMMENT" else "Bài viết rất hay, đáng để chia sẻ."
 
-    prompt = f"""
+    if task_type == "REPLY_COMMENT":
+        prompt = f"""
+Nhiệm vụ: Trả lời (reply) một comment trên mạng xã hội {platform}.
+
+Comment gốc cần reply:
+{target_content}
+
+Hướng dẫn từ quản lý:
+{instructions}
+
+Yêu cầu:
+- Viết reply thật tự nhiên, giống người thật đang tham gia thảo luận
+- Có thể đồng tình, bổ sung thêm thông tin, hoặc hỏi thêm chi tiết
+- KHÔNG dùng emoji quá nhiều, KHÔNG viết quá dài
+- Chỉ trả về nội dung reply, KHÔNG thêm giải thích
+        """.strip()
+    elif task_type == "POST_GROUP":
+        prompt = f"""
+Nhiệm vụ: Viết bài đăng vào hội nhóm trên {platform}.
+
+Thông tin nhóm/chủ đề:
+{target_content}
+
+Hướng dẫn từ quản lý:
+{instructions}
+
+Yêu cầu:
+- Viết bài hữu ích, tự nhiên, phù hợp với chủ đề nhóm
+- Có thể chia sẻ kinh nghiệm, hỏi ý kiến, hoặc giới thiệu sản phẩm tinh tế
+- KHÔNG spam, KHÔNG quá quảng cáo lộ liễu
+- Chỉ trả về nội dung bài viết, KHÔNG thêm giải thích
+        """.strip()
+    else:  # COMMENT
+        prompt = f"""
 Nhiệm vụ: Tạo nội dung seeding (loại: {task_type}) cho nền tảng {platform}.
 
 Bài viết mục tiêu (nếu có):
@@ -1041,7 +1074,7 @@ Hướng dẫn/yêu cầu từ người quản lý:
 
 Vui lòng sinh ra nội dung thật tự nhiên, giống người thật, không có vẻ giống bot spam, phù hợp với văn phong mạng xã hội.
 Chỉ trả về nội dung cần đăng/comment, KHÔNG thêm lời giải thích hay bất kỳ ký tự thừa nào.
-    """.strip()
+        """.strip()
 
     try:
         if provider_info["provider"] in ["OpenAI", "9Router"]:

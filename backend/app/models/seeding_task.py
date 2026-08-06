@@ -12,5 +12,8 @@ class SeedingTask(Base):
     generated_content = Column(Text, nullable=True)
     status = Column(String, default="pending") # pending, success, failed
     error_message = Column(Text, nullable=True)
+    task_type = Column(String, default="COMMENT") # COMMENT | REPLY_COMMENT | POST_GROUP
+    parent_task_id = Column(Integer, nullable=True) # ID task comment cha (dùng cho REPLY_COMMENT)
+    media_urls = Column(Text, nullable=True) # JSON list media cho task POST_GROUP
     executed_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)

@@ -38,6 +38,10 @@ class SeedingCampaignBase(BaseModel):
     schedule_time: Optional[datetime] = None
     status: Optional[str] = "pending"
     account_ids: Optional[str] = None # JSON list of account IDs
+    post_content: Optional[str] = None
+    media_urls: Optional[str] = None
+    daily_schedule_time: Optional[str] = None
+    is_daily_repeat: Optional[bool] = False
 
 class SeedingCampaignCreate(SeedingCampaignBase):
     pass
@@ -48,6 +52,11 @@ class SeedingCampaignUpdate(BaseModel):
     ai_instructions: Optional[str] = None
     account_ids: Optional[str] = None
     status: Optional[str] = None
+    post_content: Optional[str] = None
+    media_urls: Optional[str] = None
+    daily_schedule_time: Optional[str] = None
+    is_daily_repeat: Optional[bool] = None
+    campaign_type: Optional[str] = None
 
 class SeedingCampaignResponse(SeedingCampaignBase):
     id: int
@@ -63,6 +72,9 @@ class SeedingTaskBase(BaseModel):
     generated_content: Optional[str] = None
     status: Optional[str] = "pending"
     error_message: Optional[str] = None
+    task_type: Optional[str] = "COMMENT"
+    parent_task_id: Optional[int] = None
+    media_urls: Optional[str] = None
 
 class SeedingTaskCreate(SeedingTaskBase):
     pass
@@ -103,3 +115,9 @@ class TaskWithDetails(BaseModel):
     account_cookies: Optional[str] = None
     account_proxy: Optional[str] = None
     account_two_fa_secret: Optional[str] = None
+    # Extended fields for reply & media
+    task_type: Optional[str] = "COMMENT"
+    parent_task_id: Optional[int] = None
+    parent_comment_content: Optional[str] = None
+    media_urls: Optional[str] = None
+    post_content: Optional[str] = None

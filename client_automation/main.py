@@ -57,7 +57,9 @@ def display_tasks_table(tasks: List[Dict]):
     table.add_column("Proxy", style="dim", width=15)
     
     for t in tasks:
-        task_type = "💬 Comment" if t.get("campaign_type") == "COMMENT" else "📝 Đăng bài"
+        ct = t.get("campaign_type") or t.get("task_type", "COMMENT")
+        task_type_labels = {"COMMENT": "💬 Comment", "REPLY_COMMENT": "↩️ Reply", "POST_GROUP": "📝 Đăng bài"}
+        task_type = task_type_labels.get(ct, f"❓ {ct}")
         username = t.get("account_username", "N/A") or "N/A"
         url = t.get("target_url", "")
         if len(url) > 42:
@@ -96,6 +98,9 @@ async def process_task(task: Dict, api: APIClient, browser_mgr: BrowserManager, 
         if task_type == "COMMENT":
             from tasks.facebook_comment import execute_comment_task
             result = await execute_comment_task(context, task, api, dry_run=dry_run)
+        elif task_type == "REPLY_COMMENT":
+            from tasks.facebook_comment import execute_reply_task
+            result = await execute_reply_task(context, task, api, dry_run=dry_run)
         elif task_type == "POST_GROUP":
             from tasks.facebook_post import execute_post_task
             result = await execute_post_task(context, task, api, dry_run=dry_run)
