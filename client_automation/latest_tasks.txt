@@ -1,0 +1,5 @@
+(6, 'Test 6', 'https://www.facebook.com/dafaglass/posts/pfbid0YUw3SD5LsRnV4t58GJLuCau9MfzfdEsVSS2opZdjsZFUp75jwqebjaT1H9tvyEZal', 'failed', 'Không tìm thấy ô comment hoặc không thể gửi')
+(5, 'Test 5', 'https://www.facebook.com/dafaglass/posts/pfbid0gxGYg1dPbvNVuQ1W76A5TfhwykcVGbLQN3vqAx1jU2xukCRtwadaPqqtDKFDGSU9l', 'success', None)
+(4, 'Test 4', 'https://www.facebook.com/dafaglass/posts/pfbid0gxGYg1dPbvNVuQ1W76A5TfhwykcVGbLQN3vqAx1jU2xukCRtwadaPqqtDKFDGSU9l', 'success', None)
+(3, 'Test 3', 'https://www.facebook.com/dafaglass/posts/pfbid0gxGYg1dPbvNVuQ1W76A5TfhwykcVGbLQN3vqAx1jU2xukCRtwadaPqqtDKFDGSU9l', 'success', None)
+(2, 'Test 2', 'https://www.facebook.com/dafaglass/posts/pfbid0gxGYg1dPbvNVuQ1W76A5TfhwykcVGbLQN3vqAx1jU2xukCRtwadaPqqtDKFDGSU9l', 'success', None)

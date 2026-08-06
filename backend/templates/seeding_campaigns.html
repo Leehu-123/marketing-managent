@@ -1,0 +1,387 @@
+{% extends 'base.html' %}
+{% block title %}Chiến dịch Seeding - DAFA Glass{% endblock %}
+{% block page_title %}Chiến dịch Seeding{% endblock %}
+
+{% block content %}
+<div x-data="{
+    campaigns: [],
+    loading: true,
+    showModal: false,
+    newCampaign: {
+        name: '',
+        platform: 'facebook',
+        campaign_type: 'COMMENT',
+        target_urls: '',
+        ai_instructions: 'Hãy đóng vai một khách hàng đang tìm hiểu sản phẩm nội thất, vào khen hoặc hỏi han rất tự nhiên, tuyệt đối không lộ là seeder.'
+    },
+    
+    editingId: null,
+    accounts: [],
+    
+    showTasksModal: false,
+    campaignTasks: [],
+    viewingCampaignName: '',
+    
+    toolStatus: 'idle',
+    toolShowBrowser: false,
+
+    async init() {
+        await this.loadCampaigns();
+        await this.loadAccounts();
+        await this.checkToolStatus();
+        
+        // Auto refresh tool status and campaigns periodically
+        setInterval(() => {
+            this.checkToolStatus();
+            this.loadCampaigns(false); // background refresh
+        }, 5000);
+    },
+
+    async viewTasks(camp) {
+        this.viewingCampaignName = camp.name;
+        try {
+            const res = await fetch(`/api/v1/seeding/campaigns/${camp.id}/tasks`);
+            if (res.ok) {
+                this.campaignTasks = await res.json();
+                this.showTasksModal = true;
+            }
+        } catch (e) {
+            window.showToast('Lỗi khi tải chi tiết', 'error');
+        }
+    },
+
+    async checkToolStatus() {
+        try {
+            const res = await fetch('/api/v1/seeding/tool/status');
+            if (res.ok) {
+                const data = await res.json();
+                this.toolStatus = data.status;
+            }
+        } catch (e) {}
+    },
+    
+    async startTool() {
+        try {
+            const res = await fetch('/api/v1/seeding/tool/start', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    platform: 'facebook',
+                    show_browser: this.toolShowBrowser
+                })
+            });
+            const data = await res.json();
+            if (res.ok && data.status === 'success' || data.status === 'running') {
+                window.showToast(data.message || 'Đã khởi động Tool');
+                this.toolStatus = 'running';
+            } else {
+                window.showToast(data.message || 'Lỗi khi khởi động', 'error');
+            }
+        } catch (e) {
+            window.showToast('Lỗi kết nối', 'error');
+        }
+    },
+    
+    async stopTool() {
+        try {
+            const res = await fetch('/api/v1/seeding/tool/stop', { method: 'POST' });
+            if (res.ok) {
+                window.showToast('Đã dừng Tool');
+                this.toolStatus = 'idle';
+            }
+        } catch (e) {}
+    },
+
+    async loadAccounts() {
+        try {
+            const res = await fetch('/api/v1/seeding/accounts');
+            if (res.ok) {
+                this.accounts = await res.json();
+            }
+        } catch (e) {
+            console.error('Lỗi tải danh sách tài khoản', e);
+        }
+    },
+    
+    async loadCampaigns(showLoading = true) {
+        if (showLoading) this.loading = true;
+        try {
+            const res = await fetch('/api/v1/seeding/campaigns');
+            if (res.ok) {
+                this.campaigns = await res.json();
+            }
+        } catch (e) {
+            console.error(e);
+        } finally {
+            if (showLoading) this.loading = false;
+        }
+    },
+    
+    openAddModal() {
+        this.editingId = null;
+        this.newCampaign = {name: '', platform: 'facebook', campaign_type: 'COMMENT', target_urls: '', ai_instructions: '', account_ids: []};
+        this.showModal = true;
+    },
+    
+    editCampaign(camp) {
+        this.editingId = camp.id;
+        let urls = '';
+        if (camp.target_urls) {
+            try { urls = JSON.parse(camp.target_urls).join('\n'); } catch(e) { urls = camp.target_urls; }
+        }
+        let accIds = [];
+        if (camp.account_ids) {
+            try { 
+                let parsed = JSON.parse(camp.account_ids);
+                accIds = Array.isArray(parsed) ? parsed : [parsed];
+            } catch(e) {
+                accIds = [];
+            }
+        }
+        this.newCampaign = {
+            name: camp.name,
+            platform: camp.platform,
+            campaign_type: camp.campaign_type,
+            target_urls: urls,
+            ai_instructions: camp.ai_instructions || '',
+            account_ids: accIds
+        };
+        this.showModal = true;
+    },
+    
+    async saveCampaign() {
+        if(!this.newCampaign.name || !this.newCampaign.target_urls) {
+            window.showToast('Vui lòng nhập tên chiến dịch và link mục tiêu', 'error');
+            return;
+        }
+        try {
+            let urls = this.newCampaign.target_urls.split('\n').map(u => u.trim()).filter(u => u);
+            let payload = {...this.newCampaign, target_urls: JSON.stringify(urls), account_ids: JSON.stringify(this.newCampaign.account_ids)};
+            
+            const url = this.editingId ? `/api/v1/seeding/campaigns/${this.editingId}` : '/api/v1/seeding/campaigns';
+            const method = this.editingId ? 'PUT' : 'POST';
+
+            const res = await fetch(url, {
+                method: method,
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(payload)
+            });
+            if (res.ok) {
+                window.showToast(this.editingId ? 'Cập nhật chiến dịch thành công!' : 'Khởi tạo chiến dịch thành công!');
+                this.showModal = false;
+                this.editingId = null;
+                this.newCampaign = {name: '', platform: 'facebook', campaign_type: 'COMMENT', target_urls: '', ai_instructions: '', account_ids: []};
+                await this.loadCampaigns();
+            } else {
+                window.showToast('Lỗi khi lưu chiến dịch', 'error');
+            }
+        } catch (e) {
+            window.showToast('Lỗi hệ thống', 'error');
+        }
+    },
+    
+    async deleteCampaign(id) {
+        if(!confirm('Bạn có chắc chắn muốn xoá chiến dịch này và toàn bộ dữ liệu đi kèm?')) return;
+        try {
+            const res = await fetch(`/api/v1/seeding/campaigns/${id}`, { method: 'DELETE' });
+            if (res.ok) {
+                window.showToast('Đã xoá chiến dịch thành công');
+                await this.loadCampaigns();
+            } else {
+                window.showToast('Lỗi khi xoá chiến dịch', 'error');
+            }
+        } catch (e) {
+            window.showToast('Lỗi kết nối', 'error');
+        }
+    }
+}" class="max-w-6xl mx-auto space-y-6">
+
+    <div class="flex justify-between items-center">
+        <h2 class="text-xl font-heading font-semibold text-white">Quản lý Chiến dịch</h2>
+        <button @click="openAddModal()" class="btn btn-primary px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-lg transition">
+            + Tạo Chiến dịch
+        </button>
+    </div>
+
+    <!-- Bảng điều khiển Tool Automation -->
+    <div class="bg-surface-secondary border border-slate-700 rounded-xl p-5 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        <div>
+            <h3 class="font-semibold text-white mb-1">🤖 Client Automation Tool</h3>
+            <p class="text-sm text-slate-400">Trạng thái: 
+                <span x-show="toolStatus === 'running'" class="text-emerald-400 font-medium ml-1">● Đang chạy</span>
+                <span x-show="toolStatus !== 'running'" class="text-slate-500 font-medium ml-1">○ Đang tắt</span>
+            </p>
+        </div>
+        <div class="flex items-center gap-4">
+
+            <button x-show="toolStatus !== 'running'" @click="startTool()" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition font-medium flex items-center gap-2">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+                Khởi động Tool
+            </button>
+            <button x-show="toolStatus === 'running'" @click="stopTool()" class="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-lg transition font-medium flex items-center gap-2">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="none"><rect x="6" y="6" width="12" height="12"></rect></svg>
+                Dừng Tool
+            </button>
+        </div>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <template x-if="loading">
+            <div class="text-slate-400 col-span-full">Đang tải danh sách...</div>
+        </template>
+        <template x-if="!loading && campaigns.length === 0">
+            <div class="text-slate-400 col-span-full">Chưa có chiến dịch seeding nào.</div>
+        </template>
+        
+        <template x-for="camp in campaigns" :key="camp.id">
+            <div class="bg-surface-secondary border border-slate-700/50 rounded-xl p-5 hover:border-slate-500 transition">
+                <div class="flex justify-between items-start mb-3">
+                    <h3 class="font-semibold text-white text-lg" x-text="camp.name"></h3>
+                    <span class="px-2 py-0.5 text-xs rounded bg-slate-800 text-slate-300" x-text="camp.platform"></span>
+                </div>
+                <div class="text-sm text-slate-400 mb-4 line-clamp-2" x-text="camp.ai_instructions"></div>
+                
+                <!-- Danh sách link mục tiêu -->
+                <div class="mb-4 space-y-1" x-data="{ 
+                    getUrls() { 
+                        try { return JSON.parse(camp.target_urls); } 
+                        catch(e) { return camp.target_urls ? [camp.target_urls] : []; } 
+                    } 
+                }">
+                    <p class="text-xs text-slate-500 font-medium uppercase tracking-wider mb-2">Link mục tiêu (<span x-text="getUrls().length"></span>)</p>
+                    <div class="max-h-24 overflow-y-auto space-y-1.5 pr-1">
+                        <template x-for="url in getUrls()">
+                            <a :href="url" target="_blank" class="block text-xs text-blue-400 hover:text-blue-300 hover:underline truncate bg-slate-800/50 p-1.5 rounded" x-text="url"></a>
+                        </template>
+                    </div>
+                </div>
+                
+                <div class="flex items-center justify-between text-sm">
+                    <div class="flex items-center gap-1.5 text-slate-400">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                        <span x-text="new Date(camp.created_at).toLocaleDateString('vi-VN')"></span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <button x-show="camp.status === 'failed'" @click="viewTasks(camp)" class="text-xs text-rose-400 hover:text-rose-300 font-medium px-2 py-1 rounded bg-rose-500/10 transition flex items-center gap-1"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>Xem lỗi</button>
+                        <button x-show="camp.status === 'pending' || camp.status === 'failed'" @click="editCampaign(camp)" class="text-xs text-rose-400 hover:text-rose-300 font-medium px-2 py-1 rounded bg-rose-500/10 transition">Sửa</button>
+                        <button @click="deleteCampaign(camp.id)" class="text-xs text-slate-400 hover:text-red-400 font-medium px-2 py-1 rounded bg-slate-800 hover:bg-red-500/10 transition">Xoá</button>
+                        <span class="px-2 py-1 rounded font-medium text-xs cursor-pointer" @click="viewTasks(camp)" :class="{
+                            'bg-amber-500/10 text-amber-500': camp.status == 'pending',
+                            'bg-emerald-500/10 text-emerald-500': camp.status == 'running',
+                            'bg-blue-500/10 text-blue-500': camp.status == 'completed',
+                            'bg-red-500/10 text-red-500': camp.status == 'failed'
+                        }" x-text="camp.status"></span>
+                    </div>
+                </div>
+            </div>
+        </template>
+    </div>
+
+    <!-- Modal Xem Tasks / Lỗi -->
+    <template x-teleport="body">
+        <div x-show="showTasksModal" class="fixed inset-0 z-50 overflow-y-auto" x-cloak>
+            <div class="flex min-h-screen items-center justify-center p-4 text-center">
+            <div class="fixed inset-0 bg-black/60 backdrop-blur-sm" @click="showTasksModal = false"></div>
+            <div class="relative inline-block w-full max-w-2xl p-6 my-8 text-left align-middle bg-surface-secondary border border-slate-700 rounded-xl shadow-2xl max-h-[85vh] flex flex-col">
+                <div class="flex justify-between items-center mb-4">
+                    <h3 class="text-xl font-heading" x-text="`Chi tiết chiến dịch: ${viewingCampaignName}`"></h3>
+                    <button @click="showTasksModal = false" class="text-slate-400 hover:text-white"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button>
+                </div>
+            
+                <div class="space-y-3 overflow-y-auto pr-2">
+                    <template x-for="task in campaignTasks" :key="task.id">
+                        <div class="bg-surface-input border border-slate-700 rounded-lg p-3">
+                            <div class="flex justify-between items-start mb-2">
+                                <a :href="task.target_url" target="_blank" class="text-sm text-blue-400 hover:underline truncate mr-2" x-text="task.target_url"></a>
+                                <span class="px-2 py-0.5 rounded text-xs font-medium shrink-0" :class="{
+                                    'bg-amber-500/10 text-amber-500': task.status == 'pending',
+                                    'bg-emerald-500/10 text-emerald-500': task.status == 'success',
+                                    'bg-red-500/10 text-red-500': task.status == 'failed'
+                                }" x-text="task.status"></span>
+                            </div>
+                            <div x-show="task.error_message" class="text-sm text-red-400 bg-red-500/10 p-2 rounded mt-2 border border-red-500/20">
+                                <strong>Lỗi:</strong> <span x-text="task.error_message"></span>
+                            </div>
+                            <div x-show="task.generated_content && task.status == 'success'" class="text-sm text-emerald-400 bg-emerald-500/10 p-2 rounded mt-2 border border-emerald-500/20">
+                                <strong>Nội dung:</strong> <span x-text="task.generated_content"></span>
+                            </div>
+                        </div>
+                    </template>
+                    <template x-if="campaignTasks.length === 0">
+                        <div class="text-slate-400 text-center py-4">Chưa có dữ liệu task.</div>
+                    </template>
+                </div>
+            </div>
+            </div>
+        </div>
+    </template>
+
+    <!-- Modal Tạo Chiến Dịch -->
+    <template x-teleport="body">
+        <div x-show="showModal" class="fixed inset-0 z-50 overflow-y-auto" x-cloak>
+            <div class="flex min-h-screen items-center justify-center p-4 text-center">
+            <div class="fixed inset-0 bg-black/60 backdrop-blur-sm" @click="showModal = false"></div>
+            <div class="relative inline-block w-full max-w-xl p-6 my-8 text-left align-middle bg-surface-secondary border border-slate-700 rounded-xl shadow-2xl max-h-[85vh] overflow-y-auto">
+                <h3 class="text-xl font-heading mb-4" x-text="editingId ? 'Sửa Chiến Dịch Seeding' : 'Tạo Chiến Dịch Seeding'"></h3>
+            
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-sm text-slate-400 mb-1">Tên Chiến Dịch</label>
+                    <input type="text" x-model="newCampaign.name" class="w-full p-2 bg-surface-input border border-slate-700 rounded-lg focus:border-rose-500 outline-none text-white" placeholder="VD: Bơm seeding tháng 10 - Bếp Kính">
+                </div>
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm text-slate-400 mb-1">Nền tảng</label>
+                        <select x-model="newCampaign.platform" class="w-full p-2 bg-surface-input border border-slate-700 rounded-lg focus:border-rose-500 outline-none text-white">
+                            <option value="facebook">Facebook</option>
+                            <option value="tiktok">TikTok</option>
+                            <option value="youtube">YouTube</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm text-slate-400 mb-1">Loại Seeding</label>
+                        <select x-model="newCampaign.campaign_type" class="w-full p-2 bg-surface-input border border-slate-700 rounded-lg focus:border-rose-500 outline-none text-white">
+                            <option value="COMMENT">Comment Dạo (Auto Sinh Comment)</option>
+                            <option value="POST_GROUP">Đăng bài Hội Nhóm</option>
+                        </select>
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-sm text-slate-400 mb-1">Chọn tài khoản tham gia (Bỏ trống = Lấy random tự động)</label>
+                    <div class="space-y-2 max-h-32 overflow-y-auto p-2 bg-surface-input border border-slate-700 rounded-lg">
+                        <template x-for="acc in accounts.filter(a => a.platform === newCampaign.platform)" :key="acc.id">
+                            <label :for="'acc_' + acc.id" class="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+                                <input :id="'acc_' + acc.id" type="checkbox" 
+                                    :value="acc.id"
+                                    :checked="newCampaign.account_ids.includes(acc.id) || newCampaign.account_ids.includes(String(acc.id))"
+                                    @change="if($el.checked) { newCampaign.account_ids.push(acc.id) } else { newCampaign.account_ids = newCampaign.account_ids.filter(id => id != acc.id) }"
+                                    class="rounded border-slate-700 text-rose-500 focus:ring-rose-500 bg-surface-secondary">
+                                <span x-text="acc.username"></span>
+                                <span class="text-xs px-1.5 py-0.5 rounded-full bg-slate-800" :class="{'text-emerald-400': acc.status=='active', 'text-red-400': acc.status!='active'}" x-text="acc.status"></span>
+                            </label>
+                        </template>
+                        <template x-if="accounts.filter(a => a.platform === newCampaign.platform).length === 0">
+                            <div class="text-xs text-slate-500 p-1">Chưa có tài khoản nào trên nền tảng này.</div>
+                        </template>
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-sm text-slate-400 mb-1">Danh sách Link (Mỗi link 1 dòng)</label>
+                    <textarea x-model="newCampaign.target_urls" class="w-full p-2 bg-surface-input border border-slate-700 rounded-lg focus:border-rose-500 outline-none text-white h-28" placeholder="https://facebook.com/post/123&#10;https://tiktok.com/@user/video/456"></textarea>
+                    <p class="text-xs text-slate-500 mt-1">Là link các bài viết cần comment hoặc link các group cần đăng.</p>
+                </div>
+                <div>
+                    <label class="block text-sm text-slate-400 mb-1">Chỉ thị cho AI (System Prompt)</label>
+                    <textarea x-model="newCampaign.ai_instructions" class="w-full p-2 bg-surface-input border border-slate-700 rounded-lg focus:border-rose-500 outline-none text-white h-24" placeholder="Dặn dò AI cách xưng hô, kiểu comment..."></textarea>
+                </div>
+            </div>
+            
+            <div class="mt-6 flex justify-end gap-3">
+                <button @click="showModal = false" class="px-4 py-2 text-slate-300 hover:text-white transition">Hủy</button>
+                <button @click="saveCampaign()" class="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-lg transition font-medium">Tạo Chiến Dịch</button>
+            </div>
+            </div>
+        </div>
+    </template>
+</div>
+{% endblock %}

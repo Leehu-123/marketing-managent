@@ -13,7 +13,11 @@ def get_active_ai_client():
         return None
     db = SessionLocal()
     try:
-        setting = db.query(AISetting).filter(AISetting.is_active == True).first()
+        setting = db.query(AISetting).filter(
+            AISetting.is_active == True,
+            ~AISetting.provider_name.like('%(Image)%'),
+            ~AISetting.provider_name.like('%(Research)%')
+        ).first()
         if not setting or not setting.api_key:
             return None
             
@@ -1020,4 +1024,44 @@ class AIService:
             print(f"[AI ERROR] Lỗi khi phân tích số liệu: {e}")
             return f"### 📊 BÁO CÁO PHÂN TÍCH HIỆU QUẢ - THÁNG {month_year}\n\nHiện tại hệ thống AI đang quá tải và không thể phân tích số liệu tự động. Lỗi: {e}"
 
+def generate_seeding_content(target_content: str, instructions: str, platform: str, task_type: str = "COMMENT") -> str:
+    """Generate content for seeding tasks based on target post content and user instructions."""
+    provider_info = get_active_ai_client()
+    if not provider_info:
+        return "Tuyệt vời quá!" if task_type == "COMMENT" else "Bài viết rất hay, đáng để chia sẻ."
 
+    prompt = f"""
+Nhiệm vụ: Tạo nội dung seeding (loại: {task_type}) cho nền tảng {platform}.
+
+Bài viết mục tiêu (nếu có):
+{target_content}
+
+Hướng dẫn/yêu cầu từ người quản lý:
+{instructions}
+
+Vui lòng sinh ra nội dung thật tự nhiên, giống người thật, không có vẻ giống bot spam, phù hợp với văn phong mạng xã hội.
+Chỉ trả về nội dung cần đăng/comment, KHÔNG thêm lời giải thích hay bất kỳ ký tự thừa nào.
+    """.strip()
+
+    try:
+        if provider_info["provider"] in ["OpenAI", "9Router"]:
+            client = provider_info["client"]
+            model_name = provider_info.get("model") or settings.OPENAI_MODEL
+            response = client.chat.completions.create(
+                model=model_name,
+                messages=[
+                    {"role": "system", "content": "You are a professional social media user who writes highly engaging and natural content."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.7
+            )
+            return response.choices[0].message.content.strip()
+        elif provider_info["provider"] == "Gemini":
+            client = provider_info["client"]
+            response = client.generate_content(prompt)
+            return response.text.strip()
+    except Exception as e:
+        print(f"[AI ERROR] generate_seeding_content: {e}")
+        return "Nội dung rất hay, cảm ơn bạn đã chia sẻ!" if task_type == "COMMENT" else "Tuyệt vời."
+
+    return "Tuyệt vời!"

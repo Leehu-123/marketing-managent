@@ -110,3 +110,15 @@ def view_analytics_video(request: Request):
     if not check_cookie_auth(request):
         return RedirectResponse(url="/login", status_code=status.HTTP_302_FOUND)
     return templates.TemplateResponse(request=request, name="analytics_video.html")
+
+@router.get("/seeding/accounts", response_class=HTMLResponse)
+def view_seeding_accounts(request: Request):
+    if not check_cookie_auth(request):
+        return RedirectResponse(url="/login", status_code=status.HTTP_302_FOUND)
+    return templates.TemplateResponse(request=request, name="seeding_accounts.html")
+
+@router.get("/seeding/campaigns", response_class=HTMLResponse)
+def view_seeding_campaigns(request: Request):
+    if not check_cookie_auth(request):
+        return RedirectResponse(url="/login", status_code=status.HTTP_302_FOUND)
+    return templates.TemplateResponse(request=request, name="seeding_campaigns.html")

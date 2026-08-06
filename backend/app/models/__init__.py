@@ -13,3 +13,6 @@ from .video_content import VideoContent, VideoDistribution
 from .video_metric import VideoMetric
 from .trend import TrendCache, BannedKeyword
 from .lead import Lead, LeadActivity, Notification
+from .seeding_account import SeedingAccount
+from .seeding_campaign import SeedingCampaign
+from .seeding_task import SeedingTask

@@ -43,3 +43,6 @@ api_router.include_router(video_contents_router, prefix="/video-contents", tags=
 api_router.include_router(video_distributions_router, prefix="/video-distributions", tags=["video-distributions"], dependencies=protected_dependencies)
 
 api_router.include_router(notifications_router, prefix="/notifications", tags=["notifications"], dependencies=protected_dependencies)
+
+from app.api.v1.seeding import router as seeding_router
+api_router.include_router(seeding_router, prefix="/seeding", tags=["seeding"])

@@ -12,3 +12,4 @@ from .video_content import *
 from .video_metric import *
 from .trend import *
 from .lead import *
+from .seeding import *

@@ -52,11 +52,13 @@
     },
     renderInsights(text) {
         if (!text) return '';
+        if (typeof marked !== 'undefined') {
+            return marked.parse(text);
+        }
+        // Fallback if marked is not loaded
         return text
-            .replace(/### (.*)/g, '<h3 class=\'text-base font-bold text-white mt-5 mb-2 flex items-center gap-2\'>$1</h3>')
-            .replace(/#### (.*)/g, '<h4 class=\'text-sm font-semibold text-teal-300 mt-4 mb-2\'>$1</h4>')
-            .replace(/\\*\\*(.*?)\\*\\*/g, '<strong class=\'text-white\'>$1</strong>')
-            .replace(/^- (.*)/gm, '<li class=\'text-gray-300 text-sm leading-relaxed ml-4 mb-1.5 list-disc\'>$1</li>')
+            .replace(/### (.*)/g, '<h3 class=\'text-base font-bold text-teal-400 mt-5 mb-2\'>$1</h3>')
+            .replace(/\*\*(.*?)\*\*/g, '<strong class=\'text-white\'>$1</strong>')
             .replace(/\n\n/g, '<br><br>');
     },
         async fetchInsights() {
@@ -82,6 +84,22 @@
             this.insights = '';
         } finally {
             this.insightsLoading = false;
+        }
+    },
+    async syncData() {
+        if (this.loading) return;
+        this.loading = true;
+        try {
+            const res = await fetch('/api/v1/stats/sync', { method: 'POST' });
+            if (res.status === 401) { window.location.href = '/login'; return; }
+            const data = await res.json();
+            if (window.showToast) window.showToast(data.message || 'Đồng bộ thành công', 'success');
+            await this.init(); // Tải lại dữ liệu
+        } catch (err) {
+            console.error('Sync error:', err);
+            if (window.showToast) window.showToast('Lỗi khi đồng bộ dữ liệu', 'error');
+        } finally {
+            this.loading = false;
         }
     },
     initCharts() {
@@ -248,6 +266,11 @@
             <span class="text-gray-400 text-sm">-</span>
             <input type="date" x-model="endDate" @change="init(); if(selectedCampaign) fetchInsights()" class="form-input text-sm bg-white/5 border border-white/10 text-white rounded px-2 py-1.5" title="Đến ngày">
             <button @click="startDate=''; endDate=''; init(); if(selectedCampaign) fetchInsights()" class="text-xs bg-white/10 hover:bg-white/20 text-gray-300 px-2 py-1.5 rounded transition">Xóa lọc</button>
+            <button @click="syncData()" class="text-xs bg-teal-600 hover:bg-teal-500 text-white px-3 py-1.5 rounded flex items-center gap-1 transition ml-2 shadow-[0_0_10px_rgba(20,184,166,0.3)]" :disabled="loading">
+                <svg x-show="!loading" class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+                <svg x-show="loading" class="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                Đồng bộ Số liệu
+            </button>
         </div>
     </div>
 
@@ -533,5 +556,6 @@
         font-weight: 600;
     }
 </style>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 
 {% endblock %}

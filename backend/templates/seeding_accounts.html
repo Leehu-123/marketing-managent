@@ -1,0 +1,215 @@
+{% extends 'base.html' %}
+{% block title %}Quản lý Tài khoản Seeding - DAFA Glass{% endblock %}
+{% block page_title %}Quản lý Tài khoản Seeding{% endblock %}
+
+{% block content %}
+<div x-data="{
+    accounts: [],
+    loading: true,
+    showModal: false,
+    newAccount: {
+        platform: 'facebook',
+        username: '',
+        password: '',
+        two_fa_secret: '',
+        cookies: '',
+        proxy: ''
+    },
+    
+    editingId: null,
+    
+    async init() {
+        await this.loadAccounts();
+    },
+    
+    async loadAccounts() {
+        this.loading = true;
+        try {
+            const res = await fetch('/api/v1/seeding/accounts');
+            if (res.ok) {
+                this.accounts = await res.json();
+            }
+        } catch (e) {
+            console.error(e);
+            window.showToast('Lỗi khi tải danh sách tài khoản', 'error');
+        } finally {
+            this.loading = false;
+        }
+    },
+    
+    editAccount(acc) {
+        this.editingId = acc.id;
+        this.newAccount = {
+            platform: acc.platform,
+            username: acc.username,
+            password: acc.password || '',
+            two_fa_secret: acc.two_fa_secret || '',
+            cookies: acc.cookies || '',
+            proxy: acc.proxy || ''
+        };
+        this.showModal = true;
+    },
+    
+    openAddModal() {
+        this.editingId = null;
+        this.newAccount = {platform: 'facebook', username: '', password: '', two_fa_secret: '', cookies: '', proxy: ''};
+        this.showModal = true;
+    },
+
+    async saveAccount() {
+        try {
+            const url = this.editingId ? `/api/v1/seeding/accounts/${this.editingId}` : '/api/v1/seeding/accounts';
+            const method = this.editingId ? 'PUT' : 'POST';
+            
+            const res = await fetch(url, {
+                method: method,
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(this.newAccount)
+            });
+            if (res.ok) {
+                window.showToast(this.editingId ? 'Cập nhật tài khoản thành công!' : 'Thêm tài khoản thành công!');
+                this.showModal = false;
+                this.editingId = null;
+                this.newAccount = {platform: 'facebook', username: '', password: '', two_fa_secret: '', cookies: '', proxy: ''};
+                await this.loadAccounts();
+            } else {
+                window.showToast('Lỗi khi lưu tài khoản', 'error');
+            }
+        } catch (e) {
+            console.error(e);
+            window.showToast('Lỗi hệ thống', 'error');
+        }
+    },
+    
+    async checkAccountLive(id) {
+        window.showToast('Đang kiểm tra tài khoản...', 'info');
+        try {
+            const res = await fetch(`/api/v1/seeding/accounts/${id}/check`, {
+                method: 'POST'
+            });
+            const data = await res.json();
+            if(data.status === 'active') {
+                window.showToast(data.message, 'success');
+            } else if(data.status === 'error') {
+                window.showToast(data.message, 'error');
+            } else {
+                window.showToast(data.message, 'warning');
+            }
+            await this.loadAccounts();
+        } catch(e) {
+            window.showToast('Lỗi kiểm tra', 'error');
+        }
+    },
+    
+    async deleteAccount(id) {
+        if(!confirm('Bạn có chắc chắn muốn xóa tài khoản này không?')) return;
+        try {
+            const res = await fetch(`/api/v1/seeding/accounts/${id}`, {
+                method: 'DELETE'
+            });
+            if (res.ok) {
+                window.showToast('Đã xóa tài khoản', 'success');
+                await this.loadAccounts();
+            } else {
+                window.showToast('Lỗi khi xóa', 'error');
+            }
+        } catch(e) {
+            window.showToast('Lỗi hệ thống', 'error');
+        }
+    }
+}" class="max-w-6xl mx-auto space-y-6">
+
+    <div class="flex justify-between items-center">
+        <h2 class="text-xl font-heading font-semibold text-white">Danh sách Tài khoản</h2>
+            <button @click="openAddModal()" class="btn btn-primary btn-sm">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                Thêm Tài Khoản
+            </button>
+    </div>
+
+    <div class="card p-0 overflow-hidden bg-surface-secondary border border-slate-700/50 rounded-xl">
+        <table class="w-full text-left text-sm text-slate-300">
+            <thead class="bg-surface-tertiary text-slate-400">
+                <tr>
+                    <th class="px-6 py-4 font-medium uppercase text-xs">Nền tảng</th>
+                    <th class="px-6 py-4 font-medium uppercase text-xs">Username</th>
+                    <th class="px-6 py-4 font-medium uppercase text-xs">Trạng thái</th>
+                    <th class="px-6 py-4 font-medium uppercase text-xs">Ngày thêm</th>
+                    <th class="px-6 py-4 font-medium uppercase text-xs text-right">Thao tác</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-700/50">
+                <template x-if="loading">
+                    <tr><td colspan="5" class="px-6 py-8 text-center text-slate-500">Đang tải dữ liệu...</td></tr>
+                </template>
+                <template x-if="!loading && accounts.length === 0">
+                    <tr><td colspan="5" class="px-6 py-8 text-center text-slate-500">Chưa có tài khoản nào.</td></tr>
+                </template>
+                <template x-for="acc in accounts" :key="acc.id">
+                    <tr class="hover:bg-slate-800/30 transition">
+                        <td class="px-6 py-4 capitalize font-semibold" :class="{'text-blue-400': acc.platform=='facebook', 'text-slate-200': acc.platform=='tiktok', 'text-red-400': acc.platform=='youtube'}" x-text="acc.platform"></td>
+                        <td class="px-6 py-4" x-text="acc.username"></td>
+                        <td class="px-6 py-4">
+                            <span class="px-2.5 py-1 text-xs rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" x-show="acc.status == 'active'">Active</span>
+                            <span class="px-2.5 py-1 text-xs rounded-full bg-red-500/10 text-red-400 border border-red-500/20" x-show="acc.status != 'active'" x-text="acc.status"></span>
+                        </td>
+                        <td class="px-6 py-4 text-slate-400" x-text="new Date(acc.created_at).toLocaleDateString('vi-VN')"></td>
+                        <td class="px-6 py-4 text-right space-x-2">
+                            <button @click="editAccount(acc)" class="px-3 py-1.5 bg-slate-500/20 text-slate-300 hover:bg-slate-500/40 rounded-lg text-xs font-medium border border-slate-500/30 transition">Sửa</button>
+                            <button @click="checkAccountLive(acc.id)" class="px-3 py-1.5 bg-indigo-500/20 text-indigo-400 hover:bg-indigo-500/40 rounded-lg text-xs font-medium border border-indigo-500/30 transition">Check Live</button>
+                            <button @click="deleteAccount(acc.id)" class="px-3 py-1.5 bg-rose-500/20 text-rose-400 hover:bg-rose-500/40 rounded-lg text-xs font-medium border border-rose-500/30 transition">Xóa</button>
+                        </td>
+                    </tr>
+                </template>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Modal Thêm Tài Khoản -->
+    <template x-teleport="body">
+        <div x-show="showModal" class="fixed inset-0 z-50 overflow-y-auto" x-cloak>
+            <div class="flex min-h-screen items-center justify-center p-4 text-center">
+            <div class="fixed inset-0 bg-black/60 backdrop-blur-sm" @click="showModal = false"></div>
+            <div class="relative inline-block w-full max-w-md p-6 my-8 text-left align-middle bg-surface-secondary border border-slate-700 rounded-xl shadow-2xl max-h-[85vh] overflow-y-auto">
+                <h3 class="text-xl font-heading mb-4" x-text="editingId ? 'Cập Nhật Tài Khoản' : 'Thêm Tài Khoản Mới'"></h3>
+            
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-sm text-slate-400 mb-1">Nền tảng</label>
+                    <select x-model="newAccount.platform" class="w-full p-2 bg-surface-input border border-slate-700 rounded-lg focus:border-blue-500 outline-none text-white">
+                        <option value="facebook">Facebook</option>
+                        <option value="tiktok">TikTok</option>
+                        <option value="youtube">YouTube</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm text-slate-400 mb-1">Username / UID</label>
+                    <input type="text" x-model="newAccount.username" class="w-full p-2 bg-surface-input border border-slate-700 rounded-lg focus:border-blue-500 outline-none text-white" placeholder="VD: 1000xxxxxx">
+                </div>
+                <div>
+                    <label class="block text-sm text-slate-400 mb-1">Mật khẩu (Tùy chọn)</label>
+                    <input type="text" x-model="newAccount.password" class="w-full p-2 bg-surface-input border border-slate-700 rounded-lg focus:border-blue-500 outline-none text-white" placeholder="Mật khẩu">
+                </div>
+                <div>
+                    <label class="block text-sm text-slate-400 mb-1">Mã 2FA Secret (Tùy chọn)</label>
+                    <input type="text" x-model="newAccount.two_fa_secret" class="w-full p-2 bg-surface-input border border-slate-700 rounded-lg focus:border-blue-500 outline-none text-white" placeholder="VD: JBSWY3DPEHPK3PXP">
+                </div>
+                <div>
+                    <label class="block text-sm text-slate-400 mb-1">Cookies (Dành cho tool login bằng Cookie)</label>
+                    <textarea x-model="newAccount.cookies" class="w-full p-2 bg-surface-input border border-slate-700 rounded-lg focus:border-blue-500 outline-none text-white h-24" placeholder="Dán cookie dạng chuỗi text vào đây..."></textarea>
+                </div>
+                <div>
+                    <label class="block text-sm text-slate-400 mb-1">Proxy (Tùy chọn)</label>
+                    <input type="text" x-model="newAccount.proxy" class="w-full p-2 bg-surface-input border border-slate-700 rounded-lg focus:border-blue-500 outline-none text-white" placeholder="ip:port:user:pass">
+                </div>
+            </div>
+            
+            <div class="mt-6 flex justify-end gap-3">
+                <button @click="showModal = false" class="px-4 py-2 text-slate-300 hover:text-white transition">Hủy</button>
+                <button @click="saveAccount()" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition font-medium">Lưu Tài Khoản</button>
+            </div>
+            </div>
+        </div>
+    </template>
+</div>
+{% endblock %}

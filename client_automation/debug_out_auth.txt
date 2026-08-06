@@ -1,0 +1,4 @@
+HTML contenteditable:
+<div aria-label="Viết bình luận..." class="xzsf02u x1a2a7pz x1n2onr6 x14wi4xw notranslate" contenteditable="true" role="textbox" spellcheck="true" tabindex="0" aria-placeholder="Viết bình luận..." style="user-select: text; white-space: pre-wrap; word-break: break-word;" data-lexical-editor="true" data-interactable="|keydown||input||click|"><p class="xdj266r x14z9mp xat24cr x1lziwak" dir="auto"><br data-lexical-managed-linebreak="true"></p></div>
+HTML role textbox:
+<div aria-label="Viết bình luận..." class="xzsf02u x1a2a7pz x1n2onr6 x14wi4xw notranslate" contenteditable="true" role="textbox" spellcheck="true" tabindex="0" aria-placeholder="Viết bình luận..." style="user-select: text; white-space: pre-wrap; word-break: break-word;" data-lexical-editor="true" data-interactable="|keydown||input||click|"><p class="xdj266r x14z9mp xat24cr x1lziwak" dir="auto"><br data-lexical-managed-linebreak="true"></p></div>
