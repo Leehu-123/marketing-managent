@@ -15,6 +15,7 @@ from app.schemas.seeding import (
 from app.services.ai_service import generate_seeding_content
 import json
 import os
+import sys
 from fastapi import UploadFile, File
 from typing import List as TypingList
 
