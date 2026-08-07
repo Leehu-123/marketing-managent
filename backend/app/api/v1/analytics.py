@@ -226,23 +226,14 @@ async def sync_analytics_data(db: Session = Depends(get_db)):
                     sync_count += 1
             
             elif platform == "Fanpage":
-                # Kéo dữ liệu từ Meta (giả sử có hàm fetch_post_insights, nếu không sẽ dùng mock)
-                if hasattr(MetaService, 'fetch_post_insights'):
-                    fb_data = await MetaService.fetch_post_insights(post.published_url)
+                # Kéo dữ liệu từ Meta
+                if hasattr(MetaService, 'fetch_insights') and post.published_url:
+                    # Trích xuất post_id từ url, ví dụ: https://www.facebook.com/123456789
+                    post_id = post.published_url.rstrip('/').split('/')[-1]
+                    fb_data = await MetaService.fetch_insights(post_id)
                 else:
-                    # Mock FB data
-                    import random
-                    fb_data = {
-                        "success": True,
-                        "reach": random.randint(100, 10000),
-                        "engagement": random.randint(10, 1000),
-                        "video_views": random.randint(0, 500),
-                        "clicks": random.randint(5, 200),
-                        "reactions": random.randint(5, 500),
-                        "shares": random.randint(0, 50),
-                        "comments": random.randint(0, 100)
-                    }
-                
+                    fb_data = None
+                    
                 if fb_data and fb_data.get("success"):
                     metric.reach = fb_data.get("reach", metric.reach)
                     metric.engagement = fb_data.get("engagement", metric.engagement)
