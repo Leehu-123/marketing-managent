@@ -567,11 +567,11 @@ function seoWorkspace() {
                 const data = await res.json();
                 if (res.ok) {
                     this.selectedPost.status = "Published";
+                    if (data.published_url) this.selectedPost.published_url = data.published_url;
                     window.showToast("Đăng bài thành công lên hệ thống!", "success");
                     // Reload danh sách
                     this.loadPosts();
-                    this.selectedPost = null;
-                } else throw new Error(data.detail);
+                } else throw new Error(data.detail || "Đăng bài thất bại");
             } catch (e) {
                 window.showToast(e.message, "error");
             } finally {

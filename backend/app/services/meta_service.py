@@ -42,6 +42,22 @@ class MetaService:
         Returns:
             dict with keys: success (bool), post_id (str), url (str), error (str|None)
         """
+        # Prioritize active Fanpage integration configured in DB
+        from app.core.database import SessionLocal
+        from app.models.setting import IntegrationSetting
+        
+        db = SessionLocal()
+        try:
+            meta_setting = db.query(IntegrationSetting).filter(
+                IntegrationSetting.platform == "Fanpage",
+                IntegrationSetting.is_active == True
+            ).first()
+        finally:
+            db.close()
+
+        if meta_setting and meta_setting.url and meta_setting.access_token:
+            return await MetaService._real_publish(title, body, post_format, media_url)
+
         if settings.MOCK_META:
             return MetaService._mock_publish(title, body, post_format, media_url)
         else:

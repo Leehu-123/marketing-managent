@@ -1,3 +1,4 @@
+from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import List, Dict, Any
@@ -117,11 +118,11 @@ def draft_section(req: DraftSectionRequest, db: Session = Depends(get_db)):
         result = AIService.generate_completion(prompt)
         # Tạm thời append vào body
         if post.body:
-            post.body += f"\\n<h2>{req.section_title}</h2>\\n{result}"
+            post.body += f"\n<h2>{req.section_title}</h2>\n{result}"
         else:
-            post.body = f"<h2>{req.section_title}</h2>\\n{result}"
+            post.body = f"<h2>{req.section_title}</h2>\n{result}"
         db.commit()
-        return {"section_html": f"<h2>{req.section_title}</h2>\\n{result}"}
+        return {"section_html": f"<h2>{req.section_title}</h2>\n{result}"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -153,19 +154,58 @@ def score_onpage(req: KeywordRequest, db: Session = Depends(get_db)):
     return {"seo_score": max(0, score), "issues": issues}
 
 @router.post("/step6-publish")
-def publish_post(post_id: int, db: Session = Depends(get_db)):
+async def publish_post(post_id: int, db: Session = Depends(get_db)):
     """
-    Step 6: Technical Check & Publish (CMS API)
+    Step 6: Technical Check & Publish (CMS API / Meta API)
     """
     post = db.query(models.Post).filter(models.Post.id == post_id).first()
     if not post:
         raise HTTPException(status_code=404, detail="Không tìm thấy bài viết")
         
-    # In a real scenario, this would call CMSService or MetaService 
-    # to publish using the configured target channels on the campaign
-    
-    post.status = "Published"
-    post.published_at = __import__("datetime").datetime.now()
-    db.commit()
-    
-    return {"message": "Đăng bài thành công", "status": "Published"}
+    content_plan = post.content_plan
+    platform = content_plan.platform if content_plan else "Web"
+    post_format = content_plan.format if content_plan else "Long article"
+
+    result = None
+    if platform == "Web":
+        from app.services.cms_service import CMSService
+        result = await CMSService.publish_post(
+            title=post.title,
+            body=post.body or "",
+            meta_title=post.meta_title,
+            meta_description=post.meta_description,
+            media_url=post.media_url,
+        )
+    elif platform == "Fanpage":
+        from app.services.meta_service import MetaService
+        result = await MetaService.publish_post(
+            title=post.title,
+            body=post.body or "",
+            post_format=post_format,
+            media_url=post.media_url,
+        )
+    else:
+        from app.services.cms_service import CMSService
+        result = await CMSService.publish_post(
+            title=post.title,
+            body=post.body or "",
+            meta_title=post.meta_title,
+            meta_description=post.meta_description,
+            media_url=post.media_url,
+        )
+
+    if result and result.get("success"):
+        post.status = "Published"
+        post.published_at = datetime.now()
+        post.published_url = result.get("url", "")
+        db.commit()
+        return {
+            "message": "Đăng bài thành công",
+            "status": "Published",
+            "published_url": post.published_url
+        }
+    else:
+        error_msg = result.get("error", "Đăng bài thất bại") if result else "Không có phản hồi từ dịch vụ xuất bản"
+        post.status = "Failed"
+        db.commit()
+        raise HTTPException(status_code=400, detail=f"Không thể xuất bản bài viết: {error_msg}")

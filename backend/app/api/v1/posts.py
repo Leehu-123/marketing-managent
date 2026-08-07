@@ -79,6 +79,59 @@ def approve_post(id: int, db: Session = Depends(get_db)):
     db.refresh(db_post)
     return db_post
 
+@router.post("/{id}/publish", response_model=schemas.PostResponse)
+async def publish_post_now(id: int, db: Session = Depends(get_db)):
+    """
+    Đăng bài trực tiếp ngay lập tức lên Web (WordPress) hoặc Fanpage (Meta).
+    """
+    db_post = db.query(models.Post).filter(models.Post.id == id).first()
+    if not db_post:
+        raise HTTPException(status_code=404, detail="Không tìm thấy bài viết")
+
+    content_plan = db_post.content_plan
+    platform = content_plan.platform if content_plan else "Web"
+    post_format = content_plan.format if content_plan else "Long article"
+
+    if platform == "Web":
+        from app.services.cms_service import CMSService
+        result = await CMSService.publish_post(
+            title=db_post.title,
+            body=db_post.body or "",
+            meta_title=db_post.meta_title,
+            meta_description=db_post.meta_description,
+            media_url=db_post.media_url,
+        )
+    elif platform == "Fanpage":
+        from app.services.meta_service import MetaService
+        result = await MetaService.publish_post(
+            title=db_post.title,
+            body=db_post.body or "",
+            post_format=post_format,
+            media_url=db_post.media_url,
+        )
+    else:
+        from app.services.cms_service import CMSService
+        result = await CMSService.publish_post(
+            title=db_post.title,
+            body=db_post.body or "",
+            meta_title=db_post.meta_title,
+            meta_description=db_post.meta_description,
+            media_url=db_post.media_url,
+        )
+
+    if result and result.get("success"):
+        db_post.status = "Published"
+        db_post.published_at = datetime.now()
+        db_post.published_url = result.get("url", "")
+        db.commit()
+        db.refresh(db_post)
+        return db_post
+    else:
+        error_msg = result.get("error", "Đăng bài thất bại") if result else "Không có phản hồi từ dịch vụ"
+        db_post.status = "Failed"
+        db.commit()
+        raise HTTPException(status_code=400, detail=f"Không thể đăng bài: {error_msg}")
+
 @router.post("/{id}/revert", response_model=schemas.PostResponse)
 def revert_post(id: int, db: Session = Depends(get_db)):
     """

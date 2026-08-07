@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Alpine Test</title>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+</head>
+<body>
+    <div x-data="testComponent()">
+        <template x-for="acc in accounts" :key="acc.id">
+            <label>
+                <input type="checkbox" :value="acc.id" x-model="newCampaign.account_ids">
+                <span x-text="acc.username"></span>
+            </label>
+        </template>
+        <div x-text="JSON.stringify(newCampaign.account_ids)"></div>
+    </div>
+    <script>
+        document.addEventListener('alpine:init', () => {
+            Alpine.data('testComponent', () => ({
+                accounts: [
+                    {id: 1, username: 'test1'},
+                    {id: 2, username: 'test2'}
+                ],
+                newCampaign: {
+                    account_ids: []
+                }
+            }))
+        })
+    </script>
+</body>
+</html>

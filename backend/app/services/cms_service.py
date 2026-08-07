@@ -41,6 +41,24 @@ class CMSService:
         Returns:
             dict with keys: success (bool), post_id (int|str), url (str), error (str|None)
         """
+        # Prioritize active WordPress integration configured in DB
+        from app.core.database import SessionLocal
+        from app.models.setting import IntegrationSetting
+        
+        db = SessionLocal()
+        try:
+            wp_setting = db.query(IntegrationSetting).filter(
+                IntegrationSetting.platform == "WordPress",
+                IntegrationSetting.is_active == True
+            ).first()
+        finally:
+            db.close()
+
+        if wp_setting and wp_setting.url and wp_setting.username and wp_setting.access_token:
+            return await CMSService._real_publish(
+                title, body, meta_title, meta_description, media_url
+            )
+
         if settings.MOCK_CMS:
             return CMSService._mock_publish(title, body, meta_title, meta_description)
         else:

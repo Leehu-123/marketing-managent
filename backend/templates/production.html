@@ -20,6 +20,7 @@ function productionPage() {
     filterTime: '', // changed from '30' to '' to show all
     saving: false,
     approving: false,
+    publishing: false,
     uploading: false,
     aiGeneratingImage: false,
     aiImagePrompt: '',
@@ -196,6 +197,31 @@ function productionPage() {
             window.showToast('Không thể duyệt bài viết', 'error');
         } finally {
             this.approving = false;
+        }
+    },
+
+    async publishNow() {
+        if (!this.selectedPost) return;
+        if (!confirm('Bạn có chắc chắn muốn xuất bản bài viết này ngay lập tức?')) return;
+        
+        this.publishing = true;
+        try {
+            const res = await fetch(`/api/v1/posts/${this.selectedPost.id}/publish`, {
+                method: 'POST'
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.detail || 'Lỗi khi đăng bài');
+            
+            this.selectedPost.status = 'Published';
+            this.selectedPost.published_url = data.published_url;
+            window.showToast('Đã xuất bản bài viết thành công!', 'success');
+            
+            this.posts = this.posts.map(p => p.id === this.selectedPost.id ? { ...p, status: 'Published', published_url: data.published_url } : p);
+        } catch (err) {
+            console.error('Publish now error:', err);
+            window.showToast(err.message || 'Không thể đăng bài', 'error');
+        } finally {
+            this.publishing = false;
         }
     },
 
@@ -1169,6 +1195,13 @@ function productionPage() {
                         </div>
 
                         <div class="flex items-center gap-2">
+                            <template x-if="selectedPost.status !== 'Published' || (selectedPost.published_url && selectedPost.published_url.includes('/blog/post-'))">
+                                <button class="btn bg-cyan-600 hover:bg-cyan-500 text-white flex items-center gap-1.5 shadow-[0_0_15px_rgba(6,182,212,0.3)] transition-all" 
+                                        @click="publishNow()" :disabled="publishing">
+                                    <svg x-show="publishing" class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin mr-1"></svg>
+                                    <span x-text="selectedPost.published_url && selectedPost.published_url.includes('/blog/post-') ? '🚀 Đăng thật lên Website' : '🚀 Đăng ngay'"></span>
+                                </button>
+                            </template>
                             <template x-if="selectedPost.status === 'Approved' || selectedPost.status === 'Failed'">
                                 <button class="btn text-xs py-1.5 px-3 bg-amber-500/10 text-amber-400 border border-amber-500/20 hover:bg-amber-500/20" 
                                         @click="revertPost()" :disabled="reverting">
@@ -1176,9 +1209,9 @@ function productionPage() {
                                 </button>
                             </template>
                             <template x-if="selectedPost.status === 'Pending Review' || selectedPost.status === 'Failed'">
-                                <button class="btn btn-primary btn-pulse" @click="approvePost()" :disabled="approving">
+                                <button class="btn btn-primary" @click="approvePost()" :disabled="approving">
                                     <svg x-show="approving" class="w-4 h-4 border-2 border-slate-950 border-t-slate-800 rounded-full animate-spin mr-1"></svg>
-                                    <span>Duyệt bài viết ✓</span>
+                                    <span>Duyệt theo lịch ✓</span>
                                 </button>
                             </template>
                         </div>
