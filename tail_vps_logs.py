@@ -6,9 +6,7 @@ user = 'root'
 password = 'Y3pKPk3C4rH4EWe1'
 
 commands = [
-    "tail -n 20 /tmp/pip_client.log || echo ''",
-    "tail -n 20 /tmp/pw1.log || echo ''",
-    "tail -n 20 /tmp/pw2.log || echo ''"
+    "journalctl -u dafaglass -n 50 --no-pager"
 ]
 
 client = paramiko.SSHClient()
