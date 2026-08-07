@@ -194,22 +194,22 @@
             
             window.showToast('Lập kế hoạch thành công bởi AI!', 'success');
             
-            // Reset form
-            this.newCampaign = {
-                name: '',
-                month_year: '',
-                core_theme: '',
-                focus_products: '',
-                main_keywords: '',
-                web_frequency: 3,
-                fanpage_frequency: 4,
-                web_content_pillars: null,
-                fanpage_content_pillars: null
-            };
-            this.webPillars = [];
-            this.fanpagePillars = [];
-            this.showWebPillars = false;
-            this.showFanpagePillars = false;
+            // Reset form - KHÔNG XÓA CẤU HÌNH ĐÃ NHẬP THEO YÊU CẦU CỦA USER
+            // this.newCampaign = {
+            //     name: '',
+            //     month_year: '',
+            //     core_theme: '',
+            //     focus_products: '',
+            //     main_keywords: '',
+            //     web_frequency: 3,
+            //     fanpage_frequency: 4,
+            //     web_content_pillars: null,
+            //     fanpage_content_pillars: null
+            // };
+            // this.webPillars = [];
+            // this.fanpagePillars = [];
+            // this.showWebPillars = false;
+            // this.showFanpagePillars = false;
             
             // Reload campaigns & select campaign mới
             await this.fetchCampaigns();
