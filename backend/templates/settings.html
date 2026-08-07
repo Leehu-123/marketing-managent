@@ -30,8 +30,8 @@
         this.loading = true;
         try {
             const [resAi, resInt, resBrand] = await Promise.all([
-                fetch('/api/v1/settings/ai'),
-                fetch('/api/v1/settings/integrations'),
+                fetch('/api/v1/settings/ai/'),
+                fetch('/api/v1/settings/integrations/'),
                 fetch('/api/v1/brand/')
             ]);
             
