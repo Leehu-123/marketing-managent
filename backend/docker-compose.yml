@@ -6,7 +6,7 @@ services:
     container_name: dafa_glass_backend
     restart: unless-stopped
     ports:
-      - "3006:8000"
+      - "3007:8000"
     volumes:
       - ./dafa_glass.db:/app/dafa_glass.db
       - ./uploads:/app/uploads
