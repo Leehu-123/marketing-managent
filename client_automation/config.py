@@ -3,7 +3,10 @@
 # ============================================================
 
 # URL của Backend Web Quản Lý
-BACKEND_URL = "http://127.0.0.1:8000"
+# Khi chạy bên trong Docker container, dùng port 8000 (internal uvicorn port)
+# Khi chạy local, đổi thành http://127.0.0.1:8000 hoặc http://127.0.0.1:3007
+import os
+BACKEND_URL = os.environ.get("BACKEND_URL", "http://127.0.0.1:8000")
 
 # API Endpoints
 API_TASKS_FETCH = "/api/v1/seeding/tasks/fetch"
