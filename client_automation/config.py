@@ -37,8 +37,8 @@ TASKS_PER_POLL = 10
 # Thời gian chờ giữa các lần poll khi hết task (giây)
 POLL_INTERVAL = 60
 
-# Facebook URL (dùng Desktop UA và web chuẩn)
-FB_MBASIC_URL = "https://www.facebook.com"
+# Facebook URL - dùng mbasic cho đăng bài (form HTML đơn giản, hoạt động tốt với headless)
+FB_MBASIC_URL = "https://mbasic.facebook.com"
 
 # User Agent pool - xoay vòng ngẫu nhiên (Dùng Desktop UA)
 USER_AGENTS = [
