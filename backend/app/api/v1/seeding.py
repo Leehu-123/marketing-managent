@@ -192,7 +192,54 @@ def get_seeding_campaigns(
     skip: int = 0,
     limit: int = 100
 ):
-    return db.query(SeedingCampaign).offset(skip).limit(limit).all()
+    campaigns = db.query(SeedingCampaign).offset(skip).limit(limit).all()
+    today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    
+    result = []
+    for camp in campaigns:
+        tasks = db.query(SeedingTask).filter(SeedingTask.campaign_id == camp.id).all()
+        today_tasks = [t for t in tasks if t.created_at and t.created_at >= today_start]
+        
+        today_total = len(today_tasks)
+        today_success = sum(1 for t in today_tasks if t.status == "success")
+        today_failed = sum(1 for t in today_tasks if t.status == "failed")
+        today_pending = sum(1 for t in today_tasks if t.status in ["pending", "running"])
+        
+        last_executed = None
+        executed_tasks = [t for t in tasks if t.executed_at]
+        if executed_tasks:
+            last_executed = max(t.executed_at for t in executed_tasks)
+        elif tasks:
+            last_executed = max(t.created_at for t in tasks)
+            
+        today_label = ""
+        if camp.is_daily_repeat:
+            if today_total == 0:
+                today_label = f"Chưa chạy hôm nay (Hẹn {camp.daily_schedule_time or '--:--'})"
+            elif today_pending > 0:
+                today_label = f"Đang chạy ({today_success}/{today_total} nhóm)"
+            elif today_failed > 0:
+                today_label = f"Đã chạy ({today_success}/{today_total} xong, {today_failed} lỗi)"
+            else:
+                today_label = f"Đã chạy hôm nay ({today_success}/{today_total} nhóm xong)"
+        else:
+            if camp.status == "completed":
+                today_label = f"Đã hoàn tất ({today_success}/{len(tasks)} bài)"
+            elif camp.status == "running":
+                today_label = f"Đang chạy ({today_success}/{len(tasks)} bài)"
+            else:
+                today_label = f"Chờ chạy ({len(tasks)} bài)"
+                
+        camp_resp = SeedingCampaignResponse.model_validate(camp)
+        camp_resp.today_total = today_total
+        camp_resp.today_success = today_success
+        camp_resp.today_failed = today_failed
+        camp_resp.today_pending = today_pending
+        camp_resp.today_status_label = today_label
+        camp_resp.last_run_at = last_executed
+        result.append(camp_resp)
+        
+    return result
 
 @router.get("/campaigns/{campaign_id}/tasks", response_model=List[SeedingTaskResponse])
 def get_campaign_tasks(
@@ -204,8 +251,58 @@ def get_campaign_tasks(
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaign not found")
         
-    tasks = db.query(SeedingTask).filter(SeedingTask.campaign_id == campaign_id).all()
+    tasks = db.query(SeedingTask).filter(SeedingTask.campaign_id == campaign_id).order_by(SeedingTask.id.desc()).all()
     return tasks
+
+@router.post("/campaigns/{campaign_id}/trigger-daily")
+def trigger_daily_campaign(
+    campaign_id: int,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    campaign = db.query(SeedingCampaign).filter(SeedingCampaign.id == campaign_id).first()
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+        
+    urls = []
+    if campaign.target_urls:
+        try:
+            urls = json.loads(campaign.target_urls)
+        except Exception:
+            urls = []
+            
+    acc_ids = []
+    if campaign.account_ids:
+        try:
+            acc_ids = json.loads(campaign.account_ids)
+        except Exception:
+            acc_ids = []
+            
+    for url in urls:
+        if acc_ids:
+            for acc_id in acc_ids:
+                task = SeedingTask(
+                    campaign_id=campaign.id,
+                    account_id=acc_id,
+                    target_url=url,
+                    task_type=campaign.campaign_type,
+                    media_urls=campaign.media_urls,
+                    status="pending"
+                )
+                db.add(task)
+        else:
+            task = SeedingTask(
+                campaign_id=campaign.id,
+                target_url=url,
+                task_type=campaign.campaign_type,
+                media_urls=campaign.media_urls,
+                status="pending"
+            )
+            db.add(task)
+            
+    campaign.status = "pending"
+    db.commit()
+    return {"status": "success", "message": f"Đã kích hoạt đợt chạy mới cho chiến dịch '{campaign.name}'!"}
 
 from app.schemas.seeding import SeedingCampaignUpdate
 
@@ -462,6 +559,7 @@ def update_task_result(
     if result_in.generated_content:
         task.generated_content = result_in.generated_content
         
+    task.executed_at = datetime.utcnow()
     db.commit()
     db.refresh(task)
     

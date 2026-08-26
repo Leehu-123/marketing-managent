@@ -61,6 +61,12 @@ class SeedingCampaignUpdate(BaseModel):
 class SeedingCampaignResponse(SeedingCampaignBase):
     id: int
     created_at: datetime
+    today_total: Optional[int] = 0
+    today_success: Optional[int] = 0
+    today_failed: Optional[int] = 0
+    today_pending: Optional[int] = 0
+    today_status_label: Optional[str] = None
+    last_run_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
