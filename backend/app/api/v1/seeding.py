@@ -206,6 +206,11 @@ def get_seeding_campaigns(
         today_failed = sum(1 for t in today_tasks if t.status == "failed")
         today_pending = sum(1 for t in today_tasks if t.status in ["pending", "running"])
         
+        total_tasks = len(tasks)
+        total_success = sum(1 for t in tasks if t.status == "success")
+        total_failed = sum(1 for t in tasks if t.status == "failed")
+        total_pending = sum(1 for t in tasks if t.status in ["pending", "running"])
+        
         last_executed = None
         executed_tasks = [t for t in tasks if t.executed_at]
         if executed_tasks:
@@ -225,11 +230,13 @@ def get_seeding_campaigns(
                 today_label = f"Đã chạy hôm nay ({today_success}/{today_total} nhóm xong)"
         else:
             if camp.status == "completed":
-                today_label = f"Đã hoàn tất ({today_success}/{len(tasks)} bài)"
+                today_label = f"Đã hoàn tất ({total_success}/{total_tasks} bài)"
             elif camp.status == "running":
-                today_label = f"Đang chạy ({today_success}/{len(tasks)} bài)"
+                today_label = f"Đang chạy ({total_success}/{total_tasks} bài)"
+            elif camp.status == "failed":
+                today_label = f"Lỗi ({total_failed}/{total_tasks} bài lỗi)"
             else:
-                today_label = f"Chờ chạy ({len(tasks)} bài)"
+                today_label = f"Chờ chạy ({total_tasks} bài)"
                 
         camp_resp = SeedingCampaignResponse.model_validate(camp)
         camp_resp.today_total = today_total
