@@ -8,7 +8,7 @@ from typing import Dict
 from playwright.async_api import BrowserContext, Page
 from browser_manager import random_delay
 from api_client import APIClient
-from config import FB_MBASIC_URL
+from config import FB_MBASIC_URL, BACKEND_URL
 
 
 async def execute_post_task(context: BrowserContext, task: Dict, api: APIClient, dry_run: bool = False) -> Dict:
