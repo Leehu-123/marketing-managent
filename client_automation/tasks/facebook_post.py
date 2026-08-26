@@ -155,10 +155,11 @@ async def scrape_group_info(page: Page) -> str:
 
 
 async def submit_post(page: Page, post_content: str, media_urls: list = None) -> bool:
-    """Tìm form đăng bài trong Group trên mbasic và đăng."""
+    """Tìm form đăng bài trong Group trên mbasic hoặc Desktop FB và đăng."""
     
-    # Trên mbasic, form đăng bài có textarea hoặc link "Đăng bài"
-    # Thử click vào "Write something..." hoặc "Viết gì đó..."
+    # ----------------------------------------------------
+    # Cách 1: Thử tìm theo cấu trúc mbasic / mobile HTML
+    # ----------------------------------------------------
     write_selectors = [
         "textarea[name='xc_message']",
         "textarea[name='message']", 
@@ -172,16 +173,16 @@ async def submit_post(page: Page, post_content: str, media_urls: list = None) ->
     # Thử tìm textarea trực tiếp
     for selector in write_selectors[:3]:
         try:
-            post_input = await page.query_selector(selector)
-            if post_input:
-                tag = await post_input.evaluate("el => el.tagName")
+            el = await page.query_selector(selector)
+            if el:
+                tag = await el.evaluate("el => el.tagName")
                 if tag.lower() == "textarea":
+                    post_input = el
                     break
-                post_input = None
         except Exception:
             continue
     
-    # Nếu không tìm thấy textarea, thử click vào link composer
+    # Nếu không tìm thấy textarea, thử click vào link composer (mbasic)
     if not post_input:
         for selector in write_selectors[3:]:
             try:
@@ -189,102 +190,214 @@ async def submit_post(page: Page, post_content: str, media_urls: list = None) ->
                 if link:
                     await link.click()
                     await random_delay(2, 4)
-                    # Sau khi click, tìm textarea mới xuất hiện
                     for ts in ["textarea[name='xc_message']", "textarea[name='message']", "textarea"]:
-                        post_input = await page.query_selector(ts)
-                        if post_input:
+                        el = await page.query_selector(ts)
+                        if el:
+                            post_input = el
                             break
                     if post_input:
                         break
             except Exception:
                 continue
     
-    if not post_input:
+    # Nếu tìm thấy textarea mbasic -> xử lý theo luồng mbasic
+    if post_input:
+        print("    📝 Tìm thấy form đăng bài mbasic HTML")
+        await post_input.click()
+        await random_delay(1, 2)
+        
+        # Gõ từng đoạn
+        import random
+        chunk_size = 12
+        for i in range(0, len(post_content), chunk_size):
+            chunk = post_content[i:i+chunk_size]
+            await post_input.type(chunk, delay=random.uniform(20, 60))
+            await asyncio.sleep(random.uniform(0.02, 0.1))
+        
+        # Upload media nếu có
+        if media_urls:
+            print(f"    📎 Đang đính kèm {len(media_urls)} file media...")
+            media_selectors = [
+                "input[type='file'][name='file1']",
+                "input[type='file'][accept*='image']",
+                "input[type='file'][accept*='video']",
+                "input[type='file']",
+            ]
+            for media_url in media_urls:
+                try:
+                    import httpx
+                    import tempfile
+                    import os
+                    if media_url.startswith("/"):
+                        from config import BACKEND_URL
+                        full_url = f"{BACKEND_URL}{media_url}"
+                    else:
+                        full_url = media_url
+                    async with httpx.AsyncClient() as client:
+                        resp = await client.get(full_url)
+                        if resp.status_code == 200:
+                            ext = os.path.splitext(media_url)[1] or ".jpg"
+                            tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=ext)
+                            tmp_file.write(resp.content)
+                            tmp_file.close()
+                            for sel in media_selectors:
+                                file_input = await page.query_selector(sel)
+                                if file_input:
+                                    await file_input.set_input_files(tmp_file.name)
+                                    await random_delay(2, 4)
+                                    print(f"    ✅ Đã đính kèm: {media_url}")
+                                    break
+                            try:
+                                os.unlink(tmp_file.name)
+                            except Exception:
+                                pass
+                except Exception as e:
+                    print(f"    ⚠️ Không thể đính kèm media {media_url}: {e}")
+        
+        await random_delay(2, 4)
+        
+        submit_selectors = [
+            "input[type='submit'][name='view_post']",
+            "input[type='submit'][value*='Đăng']",
+            "input[type='submit'][value*='Post']",
+            "button[type='submit']",
+            "input[type='submit']",
+        ]
+        for selector in submit_selectors:
+            try:
+                submit_btn = await page.query_selector(selector)
+                if submit_btn:
+                    await submit_btn.click()
+                    await random_delay(4, 7)
+                    return True
+            except Exception:
+                continue
         return False
+
+    # ----------------------------------------------------
+    # Cách 2: Thử theo giao diện Desktop Facebook (React SPA)
+    # ----------------------------------------------------
+    print("    🖥️ Không thấy form mbasic, thử theo giao diện Desktop Facebook...")
+    desktop_open_selectors = [
+        "div[role='button'] span:has-text('Bạn viết gì đi')",
+        "div[role='button'] span:has-text('Viết gì đó')",
+        "div[role='button'] span:has-text('Write something')",
+        "div[role='button'] span:has-text('Tạo bài viết')",
+        "div[role='button'] span:has-text('Create a post')",
+        "div[role='main'] div[role='button'][tabindex='0']",
+    ]
     
-    # Gõ nội dung
-    await post_input.click()
+    opened_dialog = False
+    for sel in desktop_open_selectors:
+        try:
+            btn = await page.query_selector(sel)
+            if btn:
+                await btn.click()
+                await random_delay(2, 4)
+                opened_dialog = True
+                break
+        except Exception:
+            continue
+            
+    # Tìm vùng nhập trong Dialog hoặc trang Desktop
+    search_root = page
+    dialogs = await page.query_selector_all("div[role='dialog']")
+    if dialogs:
+        for dialog in reversed(dialogs):
+            box = await dialog.bounding_box()
+            if box and box['width'] > 200 and box['height'] > 200:
+                search_root = dialog
+                break
+                
+    desktop_input_selectors = [
+        "div[role='textbox'][contenteditable='true']",
+        "div[contenteditable='true'][aria-label*='Bạn đang nghĩ gì']",
+        "div[contenteditable='true'][aria-label*='Write something']",
+        "div[contenteditable='true'][aria-label*='Tạo bài viết']",
+    ]
+    
+    desktop_input = None
+    for sel in desktop_input_selectors:
+        try:
+            el = await search_root.query_selector(sel)
+            if el:
+                desktop_input = el
+                break
+        except Exception:
+            continue
+            
+    if not desktop_input:
+        return False
+        
+    print("    📝 Đã tìm thấy ô soạn thảo Desktop")
+    await desktop_input.click()
     await random_delay(1, 2)
     
-    # Gõ từng đoạn
-    import random
-    chunk_size = 8
-    for i in range(0, len(post_content), chunk_size):
-        chunk = post_content[i:i+chunk_size]
-        await post_input.type(chunk, delay=random.uniform(30, 100))
-        await asyncio.sleep(random.uniform(0.05, 0.2))
+    # Gõ nội dung bằng paste clipboard event hoặc insert_text
+    try:
+        await page.evaluate('''([el, text]) => {
+            const dataTransfer = new DataTransfer();
+            dataTransfer.setData('text/plain', text);
+            el.focus();
+            el.dispatchEvent(new ClipboardEvent('paste', {
+                clipboardData: dataTransfer,
+                bubbles: true,
+                cancelable: true
+            }));
+        }''', [desktop_input, post_content])
+    except Exception:
+        try:
+            await page.keyboard.insert_text(post_content)
+        except Exception:
+            await desktop_input.type(post_content, delay=30)
+            
+    await random_delay(2, 4)
     
-    # --- Upload media nếu có ---
+    # Xử lý upload media desktop
     if media_urls:
-        print(f"    📎 Đang đính kèm {len(media_urls)} file media...")
-        
-        # Tìm nút thêm ảnh/video trên mbasic
-        media_selectors = [
-            "input[type='file'][name='file1']",
-            "input[type='file'][accept*='image']",
-            "input[type='file'][accept*='video']",
-            "input[type='file']",
-        ]
-        
+        print(f"    📎 Đang đính kèm file media trên desktop...")
         for media_url in media_urls:
-            # Tải file từ backend
             try:
-                import httpx
-                import tempfile
-                import os
-                
-                # Nếu là URL relative, thêm backend URL
-                if media_url.startswith("/"):
-                    from config import BACKEND_URL
-                    full_url = f"{BACKEND_URL}{media_url}"
-                else:
-                    full_url = media_url
-                
+                import httpx, tempfile, os
+                full_url = f"{BACKEND_URL}{media_url}" if media_url.startswith("/") else media_url
                 async with httpx.AsyncClient() as client:
                     resp = await client.get(full_url)
                     if resp.status_code == 200:
-                        # Lưu vào temp file
                         ext = os.path.splitext(media_url)[1] or ".jpg"
                         tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=ext)
                         tmp_file.write(resp.content)
                         tmp_file.close()
-                        
-                        # Tìm input file và set
-                        for sel in media_selectors:
-                            file_input = await page.query_selector(sel)
-                            if file_input:
-                                await file_input.set_input_files(tmp_file.name)
-                                await random_delay(2, 4)
-                                print(f"    ✅ Đã đính kèm: {media_url}")
-                                break
-                        
-                        # Cleanup temp file
+                        file_inputs = await search_root.query_selector_all("input[type='file']")
+                        if not file_inputs:
+                            file_inputs = await page.query_selector_all("input[type='file']")
+                        for fi in file_inputs:
+                            await fi.set_input_files(tmp_file.name)
+                            await random_delay(2, 4)
+                            break
                         try:
                             os.unlink(tmp_file.name)
                         except Exception:
                             pass
             except Exception as e:
-                print(f"    ⚠️ Không thể đính kèm media {media_url}: {e}")
-    
+                print(f"    ⚠️ Lỗi đính kèm media: {e}")
+                
     await random_delay(2, 4)
     
-    # Tìm nút Submit
-    submit_selectors = [
-        "input[type='submit'][name='view_post']",
-        "input[type='submit'][value*='Đăng']",
-        "input[type='submit'][value*='Post']",
-        "button[type='submit']",
-        "input[type='submit']",
+    # Click nút Đăng / Post desktop
+    desktop_submit_selectors = [
+        "div[aria-label='Đăng']",
+        "div[aria-label='Post']",
+        "div[role='button']:has-text('Đăng')",
+        "div[role='button']:has-text('Post')",
     ]
-    
-    for selector in submit_selectors:
+    for sel in desktop_submit_selectors:
         try:
-            submit_btn = await page.query_selector(selector)
-            if submit_btn:
-                await submit_btn.click()
-                await random_delay(3, 6)
+            btn = await search_root.query_selector(sel)
+            if btn:
+                await btn.click()
+                await random_delay(4, 7)
                 return True
         except Exception:
             continue
-    
+            
     return False
