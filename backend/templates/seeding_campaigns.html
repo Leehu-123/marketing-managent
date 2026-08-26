@@ -284,7 +284,7 @@
     },
     
     async triggerDaily(camp) {
-        if(!confirm(`Bạn có muốn kích hoạt chạy ngay một đợt bài đăng mới cho chiến dịch "${camp.name}" không?`)) return;
+        if(!confirm(`Bạn có muốn kích hoạt chạy ngay một đợt bài đăng mới cho chiến dịch '${camp.name}' không?`)) return;
         window.showToast('Đang kích hoạt đợt chạy mới...', 'info');
         try {
             const res = await fetch(`/api/v1/seeding/campaigns/${camp.id}/trigger-daily`, {
