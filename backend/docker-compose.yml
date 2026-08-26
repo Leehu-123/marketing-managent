@@ -10,6 +10,9 @@ services:
     volumes:
       - ./dafa_glass.db:/app/dafa_glass.db
       - ./uploads:/app/uploads
+      - ./app:/app/app
+      - ./templates:/app/templates
+      - ./static:/app/static
       - ../client_automation:/app/client_automation
     environment:
       - TZ=Asia/Ho_Chi_Minh
