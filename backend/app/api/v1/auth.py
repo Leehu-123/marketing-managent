@@ -24,6 +24,7 @@ def login(login_data: UserLogin, response: Response, db: Session = Depends(get_d
         value=access_token,
         httponly=True,
         samesite="lax",
+        secure=True,
         max_age=7 * 24 * 60 * 60 # 7 days
     )
     
