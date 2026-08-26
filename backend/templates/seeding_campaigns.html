@@ -336,9 +336,12 @@
                         <span x-text="new Date(camp.created_at).toLocaleDateString('vi-VN')"></span>
                     </div>
                     <div class="flex items-center gap-2">
-                        <button x-show="camp.status === 'failed'" @click="viewTasks(camp)" class="text-xs text-rose-400 hover:text-rose-300 font-medium px-2 py-1 rounded bg-rose-500/10 transition flex items-center gap-1"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>Xem lỗi</button>
-                        <button x-show="camp.status === 'pending' || camp.status === 'failed'" @click="editCampaign(camp)" class="text-xs text-rose-400 hover:text-rose-300 font-medium px-2 py-1 rounded bg-rose-500/10 transition">Sửa</button>
-                        <button x-show="camp.campaign_type === 'REPLY_COMMENT' && (camp.status === 'pending' || camp.status === 'failed')" @click="generateReplies(camp.id)" class="text-xs text-purple-400 hover:text-purple-300 font-medium px-2 py-1 rounded bg-purple-500/10 transition">🤖 Sinh Reply</button>
+                        <button @click="viewTasks(camp)" class="text-xs text-blue-400 hover:text-blue-300 font-medium px-2 py-1 rounded bg-blue-500/10 transition flex items-center gap-1">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                            Chi tiết
+                        </button>
+                        <button @click="editCampaign(camp)" class="text-xs text-amber-400 hover:text-amber-300 font-medium px-2 py-1 rounded bg-amber-500/10 transition">Sửa</button>
+                        <button x-show="camp.campaign_type === 'REPLY_COMMENT'" @click="generateReplies(camp.id)" class="text-xs text-purple-400 hover:text-purple-300 font-medium px-2 py-1 rounded bg-purple-500/10 transition">🤖 Sinh Reply</button>
                         <button @click="deleteCampaign(camp.id)" class="text-xs text-slate-400 hover:text-red-400 font-medium px-2 py-1 rounded bg-slate-800 hover:bg-red-500/10 transition">Xoá</button>
                         <span class="px-2 py-1 rounded font-medium text-xs cursor-pointer" @click="viewTasks(camp)" :class="{
                             'bg-amber-500/10 text-amber-500': camp.status == 'pending',
@@ -373,6 +376,9 @@
                                     'bg-emerald-500/10 text-emerald-500': task.status == 'success',
                                     'bg-red-500/10 text-red-500': task.status == 'failed'
                                 }" x-text="task.status"></span>
+                            </div>
+                            <div class="text-xs text-slate-500 mb-1" x-show="task.created_at">
+                                🕒 Thời gian tạo: <span x-text="new Date(task.created_at).toLocaleString('vi-VN')"></span>
                             </div>
                             <div x-show="task.error_message" class="text-sm text-red-400 bg-red-500/10 p-2 rounded mt-2 border border-red-500/20">
                                 <strong>Lỗi:</strong> <span x-text="task.error_message"></span>
