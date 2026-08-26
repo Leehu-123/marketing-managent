@@ -114,11 +114,55 @@
             const res = await fetch('/api/v1/seeding/campaigns');
             if (res.ok) {
                 this.campaigns = await res.json();
+            } else if (res.status === 401) {
+                window.location.href = '/login';
+            } else {
+                console.error('Lỗi khi tải chiến dịch, mã lỗi:', res.status);
             }
         } catch (e) {
-            console.error(e);
+            console.error('Lỗi kết nối khi tải chiến dịch:', e);
         } finally {
             if (showLoading) this.loading = false;
+        }
+    },
+    
+    parseUrls(urlsStr) {
+        if (!urlsStr) return [];
+        try {
+            const parsed = JSON.parse(urlsStr);
+            return Array.isArray(parsed) ? parsed : [parsed];
+        } catch(e) {
+            return [urlsStr];
+        }
+    },
+    
+    formatDate(d) {
+        if (!d) return 'Chưa có';
+        try {
+            const dt = new Date(d);
+            return isNaN(dt.getTime()) ? 'Chưa có' : dt.toLocaleString('vi-VN');
+        } catch(e) {
+            return 'Chưa có';
+        }
+    },
+    
+    formatDateOnly(d) {
+        if (!d) return 'Chưa có';
+        try {
+            const dt = new Date(d);
+            return isNaN(dt.getTime()) ? 'Chưa có' : dt.toLocaleDateString('vi-VN');
+        } catch(e) {
+            return 'Chưa có';
+        }
+    },
+    
+    formatTimeOnly(d) {
+        if (!d) return '';
+        try {
+            const dt = new Date(d);
+            return isNaN(dt.getTime()) ? '' : dt.toLocaleTimeString('vi-VN');
+        } catch(e) {
+            return '';
         }
     },
     
@@ -261,11 +305,11 @@
     getGroupedTasks() {
         const groups = {};
         const todayStr = new Date().toLocaleDateString('vi-VN');
-        for (const task of this.campaignTasks) {
+        for (const task of (this.campaignTasks || [])) {
             let dateKey = 'Không xác định';
             if (task.created_at) {
                 const d = new Date(task.created_at);
-                const dStr = d.toLocaleDateString('vi-VN');
+                const dStr = isNaN(d.getTime()) ? 'Không xác định' : d.toLocaleDateString('vi-VN');
                 dateKey = (dStr === todayStr) ? `Hôm nay (${dStr})` : `Ngày ${dStr}`;
             }
             if (!groups[dateKey]) {
@@ -325,7 +369,6 @@
             </p>
         </div>
         <div class="flex items-center gap-4">
-
             <button x-show="toolStatus !== 'running'" @click="startTool()" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition font-medium flex items-center gap-2">
                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
                 Khởi động Tool
@@ -381,20 +424,15 @@
                         </button>
                     </div>
                     <div class="text-[11px] text-slate-400 mt-1 flex justify-between">
-                        <span>Lần chạy gần nhất: <strong class="text-slate-200" x-text="camp.last_run_at ? new Date(camp.last_run_at).toLocaleString('vi-VN') : 'Chưa có'"></strong></span>
+                        <span>Lần chạy gần nhất: <strong class="text-slate-200" x-text="formatDate(camp.last_run_at)"></strong></span>
                     </div>
                 </div>
                 
                 <!-- Danh sách link mục tiêu -->
-                <div class="mb-4 space-y-1" x-data="{ 
-                    getUrls() { 
-                        try { return JSON.parse(camp.target_urls); } 
-                        catch(e) { return camp.target_urls ? [camp.target_urls] : []; } 
-                    } 
-                }">
-                    <p class="text-xs text-slate-500 font-medium uppercase tracking-wider mb-2">Link mục tiêu (<span x-text="getUrls().length"></span>)</p>
+                <div class="mb-4 space-y-1">
+                    <p class="text-xs text-slate-500 font-medium uppercase tracking-wider mb-2">Link mục tiêu (<span x-text="parseUrls(camp.target_urls).length"></span>)</p>
                     <div class="max-h-24 overflow-y-auto space-y-1.5 pr-1">
-                        <template x-for="url in getUrls()">
+                        <template x-for="url in parseUrls(camp.target_urls)" :key="url">
                             <a :href="url" target="_blank" class="block text-xs text-blue-400 hover:text-blue-300 hover:underline truncate bg-slate-800/50 p-1.5 rounded" x-text="url"></a>
                         </template>
                     </div>
@@ -403,7 +441,7 @@
                 <div class="flex items-center justify-between text-sm pt-2 border-t border-slate-700/50">
                     <div class="flex items-center gap-1.5 text-slate-400 text-xs">
                         <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
-                        <span>Tạo: <span x-text="new Date(camp.created_at).toLocaleDateString('vi-VN')"></span></span>
+                        <span>Tạo: <span x-text="formatDateOnly(camp.created_at)"></span></span>
                     </div>
                     <div class="flex items-center gap-1.5">
                         <button @click="viewTasks(camp)" class="text-xs text-blue-400 hover:text-blue-300 font-medium px-2 py-1 rounded bg-blue-500/10 transition flex items-center gap-1">
