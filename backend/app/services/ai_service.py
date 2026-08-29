@@ -973,84 +973,6 @@ class AIService:
             print(f"[AI ERROR] Lỗi khi gọi OpenAI API để viết bài: {e}. Sử dụng Mock.")
             return AIService._mock_post_content(title, platform, format_type, focus_products, keywords)
 
-    @staticmethod
-    def translate_post(title: str, body: str, meta_title: str, meta_description: str, target_lang: str) -> Dict[str, str]:
-        """
-        Dịch nội dung bài viết sang ngôn ngữ đích (en, zh) trong khi giữ nguyên định dạng HTML.
-        """
-        provider_info = get_active_ai_client()
-        if not provider_info or settings.MOCK_AI:
-            print("[AI ERROR] AI không khả dụng hoặc MOCK mode được bật. Trả về bản dịch mẫu.")
-            return {
-                "title": f"[{target_lang}] {title}",
-                "body": f"[{target_lang}] {body}",
-                "meta_title": f"[{target_lang}] {meta_title}",
-                "meta_description": f"[{target_lang}] {meta_description}"
-            }
-            
-        lang_name = "Tiếng Anh" if target_lang == "en" else "Tiếng Trung (Giản thể)"
-        
-        prompt = f"""
-        Bạn là một chuyên gia dịch thuật và SEO.
-        Nhiệm vụ của bạn là DỊCH TOÀN BỘ nội dung bài viết dưới đây sang {lang_name}.
-        
-        QUY TẮC BẮT BUỘC (CRITICAL RULES):
-        1. TUYỆT ĐỐI GIỮ NGUYÊN cấu trúc các thẻ HTML (như <h1>, <h2>, <p>, <ul>, <!-- IMAGE_SLOT_1 -->, v.v...).
-        2. CHỈ DỊCH nội dung văn bản bên trong các thẻ HTML.
-        3. Tất cả văn bản kết quả trả về PHẢI 100% BẰNG {lang_name}. TUYỆT ĐỐI KHÔNG ĐƯỢC để sót lại bất kỳ câu tiếng Việt nào.
-        4. KHÔNG thêm các tiền tố như [EN], [ZH] vào tiêu đề. Chỉ trả về văn bản đã dịch.
-        
-        Nội dung gốc (Tiếng Việt):
-        - Tiêu đề (Title): {title}
-        - Meta Title: {meta_title}
-        - Meta Description: {meta_description}
-        - Nội dung HTML (Body):
-        {body}
-        
-        Hãy trả về kết quả dưới dạng JSON (KHÔNG chứa markdown block ```json):
-        {{
-            "title": "[Tiêu đề đã dịch sang {lang_name}]",
-            "meta_title": "[Meta title đã dịch sang {lang_name}]",
-            "meta_description": "[Meta description đã dịch sang {lang_name}]",
-            "body": "[Nội dung HTML đã dịch sang {lang_name}, giữ nguyên thẻ HTML]"
-        }}
-        """
-        try:
-            content = ""
-            if provider_info["provider"] in ["OpenAI", "9Router"]:
-                client = provider_info["client"]
-                model_name = provider_info.get("model") or settings.OPENAI_MODEL
-                response = client.chat.completions.create(
-                    model=model_name,
-                    messages=[
-                        {"role": "system", "content": "You are a helpful translation assistant that outputs only valid JSON objects without markdown block syntax."},
-                        {"role": "user", "content": prompt}
-                    ],
-                    temperature=0.3
-                )
-                content = response.choices[0].message.content.strip()
-            elif provider_info["provider"] == "Gemini":
-                client = provider_info["client"]
-                import google.generativeai as genai
-                full_prompt = "You are a helpful translation assistant that outputs only valid JSON objects without markdown block syntax.\n\n" + prompt
-                response = client.generate_content(
-                    full_prompt,
-                    generation_config=genai.types.GenerationConfig(max_output_tokens=8192)
-                )
-                content = response.text.strip()
-                
-            # Dùng regex để tìm chuỗi JSON bắt đầu bằng { và kết thúc bằng }
-            import re
-            json_match = re.search(r'\{[\s\S]*\}', content)
-            if json_match:
-                content = json_match.group(0)
-            else:
-                raise ValueError("Không tìm thấy dữ liệu JSON trong phản hồi của AI.")
-                
-            return json.loads(content)
-        except Exception as e:
-            print(f"[AI ERROR] Lỗi khi dịch bài: {e}\nRaw Content:\n{content if 'content' in locals() else 'None'}")
-            raise
 
     @staticmethod
     def generate_insights(campaign_name: str, month_year: str, focus_products: str, metrics_summary: str) -> str:
@@ -1108,35 +1030,6 @@ class AIService:
             print(f"[AI ERROR] Lỗi khi phân tích số liệu: {e}")
             return f"### 📊 BÁO CÁO PHÂN TÍCH HIỆU QUẢ - THÁNG {month_year}\n\nHiện tại hệ thống AI đang quá tải và không thể phân tích số liệu tự động. Lỗi: {e}"
 
-    @staticmethod
-    def ensure_post_translations_exist(db_post, db) -> None:
-        import json
-        translations = {}
-        if db_post.translations:
-            try:
-                translations = json.loads(db_post.translations)
-            except:
-                pass
-        
-        needs_update = False
-        for lang in ['en', 'zh']:
-            if lang not in translations:
-                try:
-                    t_data = AIService.translate_post(
-                        title=db_post.title,
-                        body=db_post.body or '',
-                        meta_title=db_post.meta_title or '',
-                        meta_description=db_post.meta_description or '',
-                        target_lang=lang
-                    )
-                    translations[lang] = t_data
-                    needs_update = True
-                except Exception as e:
-                    print(f'[AI ERROR] Failed to auto-translate {lang}: {e}')
-                    
-        if needs_update:
-            db_post.translations = json.dumps(translations)
-            db.commit()
 
 
 def generate_seeding_content(target_content: str, instructions: str, platform: str, task_type: str = "COMMENT") -> str:

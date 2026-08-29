@@ -20,3 +20,6 @@
 4. When making template changes inside `x-data="..."` attributes, **never use double quotes `"`** inside the attribute value. Use single quotes `'` instead, as `"` will break the HTML attribute boundary and crash Alpine.js.
 
 5. The `dafa_glass_backend` container uses volume mounts for `/app/app`, `/app/templates`, `/app/static`, so code changes via `git pull` take effect immediately without rebuilding the image. A restart is only needed for Python code changes (not template changes).
+
+6. **Multi-language Translation**: DAFA Glass app publishes ONLY in Vietnamese (Tiếng Việt). Do NOT add multi-language auto-translation, translations dependency, or Polylang multi-language linking to DAFA Glass (that feature belongs exclusively to Dakifa). NEVER touch or modify any code of Dakifa app.
+
