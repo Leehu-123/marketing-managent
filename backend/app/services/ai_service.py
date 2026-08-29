@@ -549,43 +549,44 @@ class AIService:
             except:
                 pass
                 
-        if web_pillars:
-            pillar_posts = []
-            for pillar in web_pillars:
-                count = max(1, round(web_freq * pillar.get("weight", 0) / 100))
-                pillar_posts.append({"name": pillar["name"], "count": count})
-                
-            current_total = sum(p["count"] for p in pillar_posts)
-            while current_total > web_freq and pillar_posts:
-                pillar_posts[-1]["count"] = max(1, pillar_posts[-1]["count"] - 1)
+        if web_freq > 0:
+            if web_pillars:
+                pillar_posts = []
+                for pillar in web_pillars:
+                    count = max(1, round(web_freq * pillar.get("weight", 0) / 100))
+                    pillar_posts.append({"name": pillar["name"], "count": count})
+                    
                 current_total = sum(p["count"] for p in pillar_posts)
-            while current_total < web_freq and pillar_posts:
-                pillar_posts[0]["count"] += 1
-                current_total = sum(p["count"] for p in pillar_posts)
-                
-            web_count = 0
-            for pp in pillar_posts:
-                for _ in range(pp["count"]):
-                    if web_count < web_freq:
-                        day = (web_count * (28 // max(web_freq, 1))) + 1
-                        plans.append({
-                            "title": f"[{pp['name']}] Cẩm nang {product_1} cho kiến trúc",
-                            "platform": "Web",
-                            "format": "Long article",
-                            "content_pillar": pp["name"],
-                            "scheduled_days_offset": min(day, 28)
-                        })
-                        web_count += 1
-        else:
-            for i in range(web_freq):
-                day = (i * (28 // max(web_freq, 1))) + 1
-                plans.append({
-                    "title": f"[{i+1}/{web_freq}] Cẩm nang {product_1} cho kiến trúc DAFA",
-                    "platform": "Web",
-                    "format": "Long article",
-                    "content_pillar": "Kiến thức / Hướng dẫn",
-                    "scheduled_days_offset": min(day, 28)
-                })
+                while current_total > web_freq and pillar_posts:
+                    pillar_posts[-1]["count"] = max(0, pillar_posts[-1]["count"] - 1)
+                    current_total = sum(p["count"] for p in pillar_posts)
+                while current_total < web_freq and pillar_posts:
+                    pillar_posts[0]["count"] += 1
+                    current_total = sum(p["count"] for p in pillar_posts)
+                    
+                web_count = 0
+                for pp in pillar_posts:
+                    for _ in range(pp["count"]):
+                        if web_count < web_freq:
+                            day = (web_count * (28 // max(web_freq, 1))) + 1
+                            plans.append({
+                                "title": f"[{pp['name']}] Cẩm nang {product_1} cho kiến trúc",
+                                "platform": "Web",
+                                "format": "Long article",
+                                "content_pillar": pp["name"],
+                                "scheduled_days_offset": min(day, 28)
+                            })
+                            web_count += 1
+            else:
+                for i in range(web_freq):
+                    day = (i * (28 // max(web_freq, 1))) + 1
+                    plans.append({
+                        "title": f"[{i+1}/{web_freq}] Cẩm nang {product_1} cho kiến trúc DAFA",
+                        "platform": "Web",
+                        "format": "Long article",
+                        "content_pillar": "Kiến thức / Hướng dẫn",
+                        "scheduled_days_offset": min(day, 28)
+                    })
                 
         # Fanpage plans
         fanpage_pillars = []
@@ -595,43 +596,44 @@ class AIService:
             except:
                 pass
                 
-        if fanpage_pillars:
-            pillar_posts = []
-            for pillar in fanpage_pillars:
-                count = max(1, round(fanpage_freq * pillar.get("weight", 0) / 100))
-                pillar_posts.append({"name": pillar["name"], "count": count})
-                
-            current_total = sum(p["count"] for p in pillar_posts)
-            while current_total > fanpage_freq and pillar_posts:
-                pillar_posts[-1]["count"] = max(1, pillar_posts[-1]["count"] - 1)
+        if fanpage_freq > 0:
+            if fanpage_pillars:
+                pillar_posts = []
+                for pillar in fanpage_pillars:
+                    count = max(1, round(fanpage_freq * pillar.get("weight", 0) / 100))
+                    pillar_posts.append({"name": pillar["name"], "count": count})
+                    
                 current_total = sum(p["count"] for p in pillar_posts)
-            while current_total < fanpage_freq and pillar_posts:
-                pillar_posts[0]["count"] += 1
-                current_total = sum(p["count"] for p in pillar_posts)
-                
-            fanpage_count = 0
-            for pp in pillar_posts:
-                for _ in range(pp["count"]):
-                    if fanpage_count < fanpage_freq:
-                        day = (fanpage_count * (28 // max(fanpage_freq, 1))) + 3
-                        plans.append({
-                            "title": f"[{pp['name']}] Top mẫu {product_2} từ DAFA Glass",
-                            "platform": "Fanpage",
-                            "format": "Image post",
-                            "content_pillar": pp["name"],
-                            "scheduled_days_offset": min(day, 28)
-                        })
-                        fanpage_count += 1
-        else:
-            for i in range(fanpage_freq):
-                day = (i * (28 // max(fanpage_freq, 1))) + 3
-                plans.append({
-                    "title": f"[{i+1}/{fanpage_freq}] Top mẫu {product_2} siêu sang từ DAFA Glass",
-                    "platform": "Fanpage",
-                    "format": "Image post",
-                    "content_pillar": "Sản phẩm / Bán hàng",
-                    "scheduled_days_offset": min(day, 28)
-                })
+                while current_total > fanpage_freq and pillar_posts:
+                    pillar_posts[-1]["count"] = max(0, pillar_posts[-1]["count"] - 1)
+                    current_total = sum(p["count"] for p in pillar_posts)
+                while current_total < fanpage_freq and pillar_posts:
+                    pillar_posts[0]["count"] += 1
+                    current_total = sum(p["count"] for p in pillar_posts)
+                    
+                fanpage_count = 0
+                for pp in pillar_posts:
+                    for _ in range(pp["count"]):
+                        if fanpage_count < fanpage_freq:
+                            day = (fanpage_count * (28 // max(fanpage_freq, 1))) + 3
+                            plans.append({
+                                "title": f"[{pp['name']}] Top mẫu {product_2} từ DAFA Glass",
+                                "platform": "Fanpage",
+                                "format": "Image post",
+                                "content_pillar": pp["name"],
+                                "scheduled_days_offset": min(day, 28)
+                            })
+                            fanpage_count += 1
+            else:
+                for i in range(fanpage_freq):
+                    day = (i * (28 // max(fanpage_freq, 1))) + 3
+                    plans.append({
+                        "title": f"[{i+1}/{fanpage_freq}] Top mẫu {product_2} siêu sang từ DAFA Glass",
+                        "platform": "Fanpage",
+                        "format": "Image post",
+                        "content_pillar": "Sản phẩm / Bán hàng",
+                        "scheduled_days_offset": min(day, 28)
+                    })
 
         return plans
 
@@ -789,7 +791,7 @@ class AIService:
         pillars_instruction = ""
         
         web_instr = ""
-        if web_content_pillars:
+        if web_freq > 0 and web_content_pillars:
             try:
                 pillars = json.loads(web_content_pillars)
                 if pillars:
@@ -798,7 +800,7 @@ class AIService:
                 pass
                 
         fanpage_instr = ""
-        if fanpage_content_pillars:
+        if fanpage_freq > 0 and fanpage_content_pillars:
             try:
                 pillars = json.loads(fanpage_content_pillars)
                 if pillars:
@@ -892,6 +894,7 @@ class AIService:
 
             Yêu cầu:
             - Viết theo cấu trúc HTML chuẩn (dùng thẻ <h1>, <h2>, <h3>, <p>, <ul>, <li>). CHỈ trả về phần nội dung HTML bên trong thẻ <body> (không trả về <html>, <head>).
+            - TỔNG SỐ TỪ CỦA BÀI VIẾT (phần body HTML): Khoảng 1200 - 1600 từ. Đảm bảo nội dung chuyên sâu, phân tích chi tiết, đầy đủ thông tin, cấu trúc rõ ràng. Khai thác tối đa các khía cạnh của chủ đề.
             - Nội dung chuyên sâu, văn phong phù hợp với thương hiệu.
             - Phân bổ từ khóa tự nhiên.
             - Ở các vị trí cần chèn ảnh minh họa, hãy chèn chính xác chuỗi sau: <!-- IMAGE_SLOT_N --> và ngay bên dưới nó chèn <!-- IMAGE_SLOT_PROMPT_N: mô tả chi tiết hình ảnh cần thiết kế cho đoạn này --> (N là số thứ tự 1, 2, 3...).
@@ -921,6 +924,7 @@ class AIService:
             {product_context}
 
             Yêu cầu:
+            - TỔNG SỐ TỪ CỦA BÀI VIẾT (phần body): Khoảng 150 - 250 từ. Hãy viết thật cô đọng, súc tích và kết thúc trọn vẹn. KHÔNG ĐƯỢC viết quá dài.
             - Giọng văn sinh động, bắt trend, sử dụng các biểu tượng cảm xúc (emoji) phù hợp.
             - Có các hashtag thương hiệu và ngành phù hợp.
             - Viết kèm một "Prompt gợi ý thiết kế ảnh" chi tiết để designer hoặc AI tạo ảnh minh họa phù hợp cho bài viết này.
@@ -954,6 +958,7 @@ class AIService:
                 content = response.choices[0].message.content.strip()
             elif provider_info["provider"] == "Gemini":
                 client = provider_info["client"]
+                import google.generativeai as genai
                 full_prompt = "You are a helpful assistant that outputs only valid JSON objects without markdown block syntax.\n\n" + prompt
                 response = client.generate_content(full_prompt)
                 content = response.text.strip()
@@ -967,6 +972,85 @@ class AIService:
         except Exception as e:
             print(f"[AI ERROR] Lỗi khi gọi OpenAI API để viết bài: {e}. Sử dụng Mock.")
             return AIService._mock_post_content(title, platform, format_type, focus_products, keywords)
+
+    @staticmethod
+    def translate_post(title: str, body: str, meta_title: str, meta_description: str, target_lang: str) -> Dict[str, str]:
+        """
+        Dịch nội dung bài viết sang ngôn ngữ đích (en, zh) trong khi giữ nguyên định dạng HTML.
+        """
+        provider_info = get_active_ai_client()
+        if not provider_info or settings.MOCK_AI:
+            print("[AI ERROR] AI không khả dụng hoặc MOCK mode được bật. Trả về bản dịch mẫu.")
+            return {
+                "title": f"[{target_lang}] {title}",
+                "body": f"[{target_lang}] {body}",
+                "meta_title": f"[{target_lang}] {meta_title}",
+                "meta_description": f"[{target_lang}] {meta_description}"
+            }
+            
+        lang_name = "Tiếng Anh" if target_lang == "en" else "Tiếng Trung (Giản thể)"
+        
+        prompt = f"""
+        Bạn là một chuyên gia dịch thuật và SEO.
+        Nhiệm vụ của bạn là DỊCH TOÀN BỘ nội dung bài viết dưới đây sang {lang_name}.
+        
+        QUY TẮC BẮT BUỘC (CRITICAL RULES):
+        1. TUYỆT ĐỐI GIỮ NGUYÊN cấu trúc các thẻ HTML (như <h1>, <h2>, <p>, <ul>, <!-- IMAGE_SLOT_1 -->, v.v...).
+        2. CHỈ DỊCH nội dung văn bản bên trong các thẻ HTML.
+        3. Tất cả văn bản kết quả trả về PHẢI 100% BẰNG {lang_name}. TUYỆT ĐỐI KHÔNG ĐƯỢC để sót lại bất kỳ câu tiếng Việt nào.
+        4. KHÔNG thêm các tiền tố như [EN], [ZH] vào tiêu đề. Chỉ trả về văn bản đã dịch.
+        
+        Nội dung gốc (Tiếng Việt):
+        - Tiêu đề (Title): {title}
+        - Meta Title: {meta_title}
+        - Meta Description: {meta_description}
+        - Nội dung HTML (Body):
+        {body}
+        
+        Hãy trả về kết quả dưới dạng JSON (KHÔNG chứa markdown block ```json):
+        {{
+            "title": "[Tiêu đề đã dịch sang {lang_name}]",
+            "meta_title": "[Meta title đã dịch sang {lang_name}]",
+            "meta_description": "[Meta description đã dịch sang {lang_name}]",
+            "body": "[Nội dung HTML đã dịch sang {lang_name}, giữ nguyên thẻ HTML]"
+        }}
+        """
+        try:
+            content = ""
+            if provider_info["provider"] in ["OpenAI", "9Router"]:
+                client = provider_info["client"]
+                model_name = provider_info.get("model") or settings.OPENAI_MODEL
+                response = client.chat.completions.create(
+                    model=model_name,
+                    messages=[
+                        {"role": "system", "content": "You are a helpful translation assistant that outputs only valid JSON objects without markdown block syntax."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    temperature=0.3
+                )
+                content = response.choices[0].message.content.strip()
+            elif provider_info["provider"] == "Gemini":
+                client = provider_info["client"]
+                import google.generativeai as genai
+                full_prompt = "You are a helpful translation assistant that outputs only valid JSON objects without markdown block syntax.\n\n" + prompt
+                response = client.generate_content(
+                    full_prompt,
+                    generation_config=genai.types.GenerationConfig(max_output_tokens=8192)
+                )
+                content = response.text.strip()
+                
+            # Dùng regex để tìm chuỗi JSON bắt đầu bằng { và kết thúc bằng }
+            import re
+            json_match = re.search(r'\{[\s\S]*\}', content)
+            if json_match:
+                content = json_match.group(0)
+            else:
+                raise ValueError("Không tìm thấy dữ liệu JSON trong phản hồi của AI.")
+                
+            return json.loads(content)
+        except Exception as e:
+            print(f"[AI ERROR] Lỗi khi dịch bài: {e}\nRaw Content:\n{content if 'content' in locals() else 'None'}")
+            raise
 
     @staticmethod
     def generate_insights(campaign_name: str, month_year: str, focus_products: str, metrics_summary: str) -> str:
@@ -1023,6 +1107,37 @@ class AIService:
         except Exception as e:
             print(f"[AI ERROR] Lỗi khi phân tích số liệu: {e}")
             return f"### 📊 BÁO CÁO PHÂN TÍCH HIỆU QUẢ - THÁNG {month_year}\n\nHiện tại hệ thống AI đang quá tải và không thể phân tích số liệu tự động. Lỗi: {e}"
+
+    @staticmethod
+    def ensure_post_translations_exist(db_post, db) -> None:
+        import json
+        translations = {}
+        if db_post.translations:
+            try:
+                translations = json.loads(db_post.translations)
+            except:
+                pass
+        
+        needs_update = False
+        for lang in ['en', 'zh']:
+            if lang not in translations:
+                try:
+                    t_data = AIService.translate_post(
+                        title=db_post.title,
+                        body=db_post.body or '',
+                        meta_title=db_post.meta_title or '',
+                        meta_description=db_post.meta_description or '',
+                        target_lang=lang
+                    )
+                    translations[lang] = t_data
+                    needs_update = True
+                except Exception as e:
+                    print(f'[AI ERROR] Failed to auto-translate {lang}: {e}')
+                    
+        if needs_update:
+            db_post.translations = json.dumps(translations)
+            db.commit()
+
 
 def generate_seeding_content(target_content: str, instructions: str, platform: str, task_type: str = "COMMENT") -> str:
     """Generate content for seeding tasks based on target post content and user instructions."""
@@ -1098,3 +1213,4 @@ Chỉ trả về nội dung cần đăng/comment, KHÔNG thêm lời giải thí
         return "Nội dung rất hay, cảm ơn bạn đã chia sẻ!" if task_type == "COMMENT" else "Tuyệt vời."
 
     return "Tuyệt vời!"
+

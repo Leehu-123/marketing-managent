@@ -14,5 +14,7 @@ services:
       - ./templates:/app/templates
       - ./static:/app/static
       - ../client_automation:/app/client_automation
+    env_file:
+      - .env
     environment:
       - TZ=Asia/Ho_Chi_Minh
