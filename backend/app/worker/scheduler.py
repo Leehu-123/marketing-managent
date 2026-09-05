@@ -7,7 +7,7 @@ then publishes them to the appropriate platform (WordPress or Facebook).
 
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
@@ -252,6 +252,145 @@ async def _create_daily_seeding_tasks():
         db.close()
 
 
+# ============================================================
+# Stale Task Recovery & Tool Health Check
+# ============================================================
+
+STALE_TASK_TIMEOUT_MINUTES = 15
+MAX_TASK_RETRIES = 3
+MAX_TOOL_AUTO_RESTARTS = 3
+
+# Tool tracking state (shared with seeding.py via import)
+tool_crash_info = {
+    "last_crash_at": None,
+    "auto_restart_count": 0,
+    "tool_started_at": None,
+}
+
+
+async def _recover_stale_seeding_tasks():
+    """
+    Quét và phục hồi các seeding tasks bị kẹt ở trạng thái 'in_progress' quá lâu.
+    - Tasks in_progress > STALE_TASK_TIMEOUT_MINUTES phút → reset về 'pending'
+    - Nếu retry_count >= MAX_TASK_RETRIES → đánh dấu 'failed'
+    """
+    from app.models.seeding_campaign import SeedingCampaign
+    from app.models.seeding_task import SeedingTask
+
+    db = SessionLocal()
+    try:
+        cutoff = datetime.utcnow() - timedelta(minutes=STALE_TASK_TIMEOUT_MINUTES)
+
+        # Tìm tasks in_progress đã quá thời gian chờ
+        stale_tasks = db.query(SeedingTask).filter(
+            SeedingTask.status == "in_progress",
+            SeedingTask.created_at <= cutoff
+        ).all()
+
+        if not stale_tasks:
+            return
+
+        recovered = 0
+        marked_failed = 0
+
+        for task in stale_tasks:
+            if task.retry_count >= MAX_TASK_RETRIES:
+                task.status = "failed"
+                task.error_message = f"Timeout — task không hoàn thành sau {MAX_TASK_RETRIES} lần thử. Có thể tool bị crash hoặc Facebook chặn."
+                task.executed_at = datetime.utcnow()
+                marked_failed += 1
+            else:
+                task.status = "pending"
+                task.retry_count = (task.retry_count or 0) + 1
+                task.error_message = None
+                recovered += 1
+
+        db.commit()
+
+        if recovered > 0 or marked_failed > 0:
+            logger.info(
+                f"[SCHEDULER] Stale task recovery: {recovered} reset to pending, "
+                f"{marked_failed} marked as failed"
+            )
+
+        # Kiểm tra và cập nhật trạng thái campaign nếu tất cả tasks đã hoàn thành
+        campaign_ids = set(t.campaign_id for t in stale_tasks)
+        for cid in campaign_ids:
+            total = db.query(SeedingTask).filter(SeedingTask.campaign_id == cid).count()
+            finished = db.query(SeedingTask).filter(
+                SeedingTask.campaign_id == cid,
+                SeedingTask.status.in_(["success", "failed"])
+            ).count()
+            if total > 0 and finished == total:
+                camp = db.query(SeedingCampaign).filter(SeedingCampaign.id == cid).first()
+                if camp and camp.status == "running":
+                    all_failed = db.query(SeedingTask).filter(
+                        SeedingTask.campaign_id == cid,
+                        SeedingTask.status == "failed"
+                    ).count()
+                    camp.status = "failed" if all_failed == total else "completed"
+                    logger.info(f"[SCHEDULER] Campaign #{cid} auto-completed → {camp.status}")
+                    db.commit()
+
+    except Exception as exc:
+        logger.error(f"[SCHEDULER] Error in _recover_stale_seeding_tasks: {exc}")
+        db.rollback()
+    finally:
+        db.close()
+
+
+async def _check_tool_health():
+    """
+    Giám sát process của client automation tool.
+    Nếu tool đã crash (process exited) và vẫn còn campaigns active → tự động restart.
+    Giới hạn MAX_TOOL_AUTO_RESTARTS lần restart liên tiếp.
+    """
+    from app.api.v1.seeding import client_tool_process, start_tool_internal
+
+    if client_tool_process is None:
+        return  # Tool chưa từng được start, bỏ qua
+
+    if client_tool_process.poll() is None:
+        # Tool đang chạy bình thường — reset counter
+        if tool_crash_info["auto_restart_count"] > 0:
+            tool_crash_info["auto_restart_count"] = 0
+        return
+
+    # Tool đã exit (crash hoặc tự kết thúc)
+    tool_crash_info["last_crash_at"] = datetime.utcnow().isoformat()
+    logger.warning(f"[SCHEDULER] Client tool process exited (code={client_tool_process.returncode})")
+
+    # Kiểm tra còn campaigns active không
+    from app.models.seeding_campaign import SeedingCampaign
+    db = SessionLocal()
+    try:
+        active = db.query(SeedingCampaign).filter(
+            SeedingCampaign.status.in_(["pending", "running"])
+        ).count()
+
+        if active == 0:
+            logger.info("[SCHEDULER] No active campaigns — tool restart skipped")
+            return
+
+        if tool_crash_info["auto_restart_count"] >= MAX_TOOL_AUTO_RESTARTS:
+            logger.error(
+                f"[SCHEDULER] Tool đã crash {MAX_TOOL_AUTO_RESTARTS} lần liên tiếp — "
+                f"dừng auto-restart. Cần kiểm tra thủ công."
+            )
+            return
+
+        # Auto-restart
+        tool_crash_info["auto_restart_count"] += 1
+        logger.info(
+            f"[SCHEDULER] Auto-restarting tool (attempt {tool_crash_info['auto_restart_count']}"
+            f"/{MAX_TOOL_AUTO_RESTARTS})"
+        )
+        start_tool_internal(platform="facebook")
+
+    except Exception as exc:
+        logger.error(f"[SCHEDULER] Error in _check_tool_health: {exc}")
+    finally:
+        db.close()
 
 
 def start_scheduler() -> AsyncIOScheduler:
@@ -290,6 +429,22 @@ def start_scheduler() -> AsyncIOScheduler:
         trigger=IntervalTrigger(seconds=60),
         id="create_daily_seeding_tasks",
         name="Create daily seeding tasks on schedule",
+        replace_existing=True,
+        max_instances=1,
+    )
+    _scheduler.add_job(
+        _recover_stale_seeding_tasks,
+        trigger=IntervalTrigger(seconds=300),  # Mỗi 5 phút
+        id="recover_stale_seeding_tasks",
+        name="Recover stale in_progress seeding tasks",
+        replace_existing=True,
+        max_instances=1,
+    )
+    _scheduler.add_job(
+        _check_tool_health,
+        trigger=IntervalTrigger(seconds=120),  # Mỗi 2 phút
+        id="check_tool_health",
+        name="Check client automation tool health",
         replace_existing=True,
         max_instances=1,
     )

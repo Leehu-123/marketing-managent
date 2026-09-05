@@ -29,6 +29,8 @@
     
     toolStatus: 'idle',
     toolShowBrowser: false,
+    toolCrashInfo: null,
+    toolStaleTasks: 0,
 
     async init() {
         await this.loadCampaigns();
@@ -61,6 +63,12 @@
             if (res.ok) {
                 const data = await res.json();
                 this.toolStatus = data.status;
+                this.toolStaleTasks = data.stale_tasks_count || 0;
+                this.toolCrashInfo = {
+                    lastCrashAt: data.last_crash_at,
+                    autoRestartCount: data.auto_restart_count || 0,
+                    toolStartedAt: data.tool_started_at,
+                };
             }
         } catch (e) {}
     },
@@ -95,6 +103,23 @@
                 this.toolStatus = 'idle';
             }
         } catch (e) {}
+    },
+
+    async recoverCampaign(campId) {
+        try {
+            const res = await fetch(`/api/v1/seeding/campaigns/${campId}/recover`, {
+                method: 'POST'
+            });
+            const data = await res.json();
+            if (res.ok && data.status === 'success') {
+                window.showToast(data.message);
+                await this.loadCampaigns();
+            } else {
+                window.showToast(data.message || 'Không có task nào bị kẹt', 'info');
+            }
+        } catch (e) {
+            window.showToast('Lỗi khi khôi phục', 'error');
+        }
     },
 
     async loadAccounts() {
@@ -360,22 +385,41 @@
     </div>
 
     <!-- Bảng điều khiển Tool Automation -->
-    <div class="bg-surface-secondary border border-slate-700 rounded-xl p-5 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-        <div>
-            <h3 class="font-semibold text-white mb-1">🤖 Client Automation Tool</h3>
-            <p class="text-sm text-slate-400">Trạng thái: 
-                <span x-show="toolStatus === 'running'" class="text-emerald-400 font-medium ml-1">● Đang chạy</span>
-                <span x-show="toolStatus !== 'running'" class="text-slate-500 font-medium ml-1">○ Đang tắt</span>
-            </p>
+    <div class="bg-surface-secondary border border-slate-700 rounded-xl p-5 flex flex-col gap-4">
+        <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+            <div>
+                <h3 class="font-semibold text-white mb-1">🤖 Client Automation Tool</h3>
+                <p class="text-sm text-slate-400">Trạng thái: 
+                    <span x-show="toolStatus === 'running'" class="text-emerald-400 font-medium ml-1">● Đang chạy</span>
+                    <span x-show="toolStatus !== 'running'" class="text-slate-500 font-medium ml-1">○ Đang tắt</span>
+                    <span x-show="toolStaleTasks > 0" class="text-amber-400 font-medium ml-2">⚠ <span x-text="toolStaleTasks"></span> task đang xử lý</span>
+                </p>
+            </div>
+            <div class="flex items-center gap-4">
+                <button x-show="toolStatus !== 'running'" @click="startTool()" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition font-medium flex items-center gap-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+                    Khởi động Tool
+                </button>
+                <button x-show="toolStatus === 'running'" @click="stopTool()" class="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-lg transition font-medium flex items-center gap-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="none"><rect x="6" y="6" width="12" height="12"></rect></svg>
+                    Dừng Tool
+                </button>
+            </div>
         </div>
-        <div class="flex items-center gap-4">
-            <button x-show="toolStatus !== 'running'" @click="startTool()" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition font-medium flex items-center gap-2">
-                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
-                Khởi động Tool
-            </button>
-            <button x-show="toolStatus === 'running'" @click="stopTool()" class="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-lg transition font-medium flex items-center gap-2">
-                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="none"><rect x="6" y="6" width="12" height="12"></rect></svg>
-                Dừng Tool
+        <!-- Crash notification banner -->
+        <div x-show="toolCrashInfo && toolCrashInfo.lastCrashAt" class="bg-amber-900/30 border border-amber-700/50 rounded-lg p-3 flex items-center justify-between">
+            <div class="flex items-center gap-2">
+                <span class="text-amber-400 text-lg">⚠️</span>
+                <div>
+                    <p class="text-amber-300 text-sm font-medium">Tool đã bị crash/dừng đột ngột</p>
+                    <p class="text-amber-400/70 text-xs">
+                        Lần crash gần nhất: <span x-text="toolCrashInfo.lastCrashAt ? new Date(toolCrashInfo.lastCrashAt).toLocaleString('vi-VN') : 'N/A'"></span>
+                        · Auto-restart: <span x-text="toolCrashInfo.autoRestartCount"></span>/3 lần
+                    </p>
+                </div>
+            </div>
+            <button x-show="toolStatus !== 'running'" @click="startTool()" class="px-3 py-1 bg-amber-600 hover:bg-amber-700 text-white text-sm rounded-lg transition">
+                Khởi động lại
             </button>
         </div>
     </div>
@@ -451,6 +495,7 @@
                         <button @click="editCampaign(camp)" class="text-xs text-amber-400 hover:text-amber-300 font-medium px-2 py-1 rounded bg-amber-500/10 transition">Sửa</button>
                         <button x-show="camp.campaign_type === 'REPLY_COMMENT'" @click="generateReplies(camp.id)" class="text-xs text-purple-400 hover:text-purple-300 font-medium px-2 py-1 rounded bg-purple-500/10 transition">🤖 Reply</button>
                         <button @click="deleteCampaign(camp.id)" class="text-xs text-slate-400 hover:text-red-400 font-medium px-2 py-1 rounded bg-slate-800 hover:bg-red-500/10 transition">Xoá</button>
+                        <button x-show="camp.status === 'running'" @click="recoverCampaign(camp.id)" class="text-xs text-amber-400 hover:text-amber-300 font-medium px-2 py-1 rounded bg-amber-500/10 transition" title="Reset tasks bị kẹt về trạng thái chờ">🔄 Khôi phục</button>
                         <span class="px-2 py-1 rounded font-medium text-xs cursor-pointer" @click="viewTasks(camp)" :class="{
                             'bg-amber-500/10 text-amber-500': camp.status == 'pending',
                             'bg-emerald-500/10 text-emerald-500': camp.status == 'running',

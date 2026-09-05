@@ -15,5 +15,6 @@ class SeedingTask(Base):
     task_type = Column(String, default="COMMENT") # COMMENT | REPLY_COMMENT | POST_GROUP
     parent_task_id = Column(Integer, nullable=True) # ID task comment cha (dùng cho REPLY_COMMENT)
     media_urls = Column(Text, nullable=True) # JSON list media cho task POST_GROUP
+    retry_count = Column(Integer, default=0, nullable=False) # Số lần retry khi task bị kẹt in_progress
     executed_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)

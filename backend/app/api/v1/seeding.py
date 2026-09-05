@@ -602,18 +602,12 @@ class ToolStartRequest(BaseModel):
     platform: str = "facebook"
     show_browser: bool = False
 
-@router.post("/tool/start")
-def start_tool(req: ToolStartRequest):
-    global client_tool_process
-    
-    if client_tool_process is not None:
-        if client_tool_process.poll() is None:
-            return {"status": "running", "message": "Tool đang chạy rồi!"}
-            
+
+def _find_tool_paths():
+    """Tìm đường dẫn Python executable và main.py cho client automation tool."""
     current_dir = os.path.dirname(os.path.abspath(__file__))
     project_root = os.path.abspath(os.path.join(current_dir, "../../../"))
     
-    # Tìm client_automation theo các đường dẫn khả thi
     client_dir_candidates = [
         os.path.join(project_root, "client_automation"),
         "/app/client_automation",
@@ -626,13 +620,11 @@ def start_tool(req: ToolStartRequest):
         if os.path.exists(cd):
             client_dir = cd
             break
-            
     if not client_dir:
         client_dir = os.path.join(project_root, "client_automation")
-        
+    
     main_script = os.path.join(client_dir, "main.py")
     
-    # Danh sách ứng viên Python executable
     python_candidates = [
         os.path.join(client_dir, "venv", "Scripts", "python.exe"),
         os.path.join(client_dir, "venv", "bin", "python"),
@@ -648,28 +640,55 @@ def start_tool(req: ToolStartRequest):
         if cand and os.path.exists(cand):
             python_exe = cand
             break
-            
+    
+    return client_dir, main_script, python_exe
+
+
+def start_tool_internal(platform: str = "facebook", show_browser: bool = False):
+    """
+    Internal function to start the client automation tool.
+    Used by both the API endpoint and the scheduler auto-restart.
+    Returns (success: bool, message: str).
+    """
+    global client_tool_process
+    
+    if client_tool_process is not None:
+        if client_tool_process.poll() is None:
+            return True, "Tool đang chạy rồi!"
+    
+    client_dir, main_script, python_exe = _find_tool_paths()
+    
     if not python_exe or not os.path.exists(main_script):
-        return {"status": "error", "message": f"Chưa tìm thấy môi trường Python phù hợp cho Client Tool tại: {client_dir}"}
-        
-    cmd = [python_exe, main_script, "--platform", req.platform]
-    if req.show_browser:
+        return False, f"Chưa tìm thấy môi trường Python phù hợp cho Client Tool tại: {client_dir}"
+    
+    cmd = [python_exe, main_script, "--platform", platform]
+    if show_browser:
         cmd.append("--show-browser")
-        
+    
     try:
-        # Popen without waiting
         env = os.environ.copy()
         env["PYTHONIOENCODING"] = "utf-8"
-        creationflags = subprocess.CREATE_NEW_CONSOLE if (sys.platform == "win32" and req.show_browser) else 0
+        creationflags = subprocess.CREATE_NEW_CONSOLE if (sys.platform == "win32" and show_browser) else 0
         client_tool_process = subprocess.Popen(
             cmd,
             cwd=client_dir,
             env=env,
             creationflags=creationflags
         )
-        return {"status": "success", "message": "Đã khởi động Tool Automation!"}
+        # Track start time for crash info
+        from app.worker.scheduler import tool_crash_info
+        tool_crash_info["tool_started_at"] = datetime.utcnow().isoformat()
+        return True, "Đã khởi động Tool Automation!"
     except Exception as e:
-        return {"status": "error", "message": str(e)}
+        return False, str(e)
+
+
+@router.post("/tool/start")
+def start_tool(req: ToolStartRequest):
+    success, message = start_tool_internal(platform=req.platform, show_browser=req.show_browser)
+    if success:
+        return {"status": "success", "message": message}
+    return {"status": "error", "message": message}
 
 @router.post("/tool/stop")
 def stop_tool():
@@ -683,9 +702,71 @@ def stop_tool():
 @router.get("/tool/status")
 def get_tool_status():
     global client_tool_process
-    if client_tool_process and client_tool_process.poll() is None:
-        return {"status": "running"}
-    return {"status": "idle"}
+    from app.worker.scheduler import tool_crash_info
+    
+    is_running = client_tool_process is not None and client_tool_process.poll() is None
+    
+    result = {
+        "status": "running" if is_running else "idle",
+        "last_crash_at": tool_crash_info.get("last_crash_at"),
+        "auto_restart_count": tool_crash_info.get("auto_restart_count", 0),
+        "tool_started_at": tool_crash_info.get("tool_started_at"),
+    }
+    
+    # Check for stale tasks as a health indicator
+    if is_running:
+        from app.core.database import SessionLocal
+        db = SessionLocal()
+        try:
+            stale_count = db.query(SeedingTask).filter(
+                SeedingTask.status == "in_progress"
+            ).count()
+            result["stale_tasks_count"] = stale_count
+        except Exception:
+            result["stale_tasks_count"] = 0
+        finally:
+            db.close()
+    
+    return result
+
+
+@router.post("/campaigns/{campaign_id}/recover")
+def recover_campaign(
+    campaign_id: int,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """Reset tất cả tasks in_progress về pending cho campaign cụ thể."""
+    campaign = db.query(SeedingCampaign).filter(SeedingCampaign.id == campaign_id).first()
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    
+    stale_tasks = db.query(SeedingTask).filter(
+        SeedingTask.campaign_id == campaign_id,
+        SeedingTask.status == "in_progress"
+    ).all()
+    
+    if not stale_tasks:
+        return {"status": "ok", "message": "Không có task nào bị kẹt.", "recovered": 0}
+    
+    recovered = 0
+    for task in stale_tasks:
+        task.status = "pending"
+        task.retry_count = (task.retry_count or 0) + 1
+        task.error_message = None
+        recovered += 1
+    
+    # Đảm bảo campaign ở trạng thái pending/running để tool pick up
+    if campaign.status not in ["pending", "running"]:
+        campaign.status = "pending"
+    
+    db.commit()
+    
+    return {
+        "status": "success",
+        "message": f"Đã reset {recovered} task bị kẹt về trạng thái chờ.",
+        "recovered": recovered
+    }
 
 
 # --- AI Integration ---
