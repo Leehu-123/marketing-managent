@@ -29,6 +29,7 @@ class PostBase(BaseModel):
     fb_post_type: str = "post"
     utm_source: str = "saas_dafa"
     status: str = "Pending Review" # "Pending Review", "Approved", "Published", "Failed"
+    translations: Optional[str] = None
     published_at: Optional[datetime] = None
     published_url: Optional[str] = None
 
@@ -56,6 +57,7 @@ class PostUpdate(BaseModel):
     fb_post_type: Optional[str] = None
     utm_source: Optional[str] = None
     status: Optional[str] = None
+    translations: Optional[str] = None
     published_at: Optional[datetime] = None
     published_url: Optional[str] = None
 

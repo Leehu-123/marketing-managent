@@ -4,7 +4,11 @@
 
 {% block content %}
 <div x-data="{
-    activeTab: 'ai', // 'ai', 'website', 'fanpage', 'imagegen'
+    activeTab: 'ai', // 'ai', 'website', 'fanpage', 'imagegen', 'sheets'
+    sheetsConfig: { spreadsheet_id: '', credentials_json: '', auto_sync: true, has_credentials: false },
+    sheetsTesting: false,
+    sheetsSaving: false,
+    sheetsSyncing: false,
     loading: true,
     saving: false,
     testing: null,
@@ -24,6 +28,7 @@
     async init() {
         await this.loadAllSettings();
         await this.loadImageGenSettings();
+        await this.loadSheetsConfig();
     },
     
     async loadAllSettings() {
@@ -169,6 +174,92 @@
         }
     },
     
+    async loadSheetsConfig() {
+        try {
+            const res = await fetch('/api/v1/settings/integrations/google-sheets/config');
+            if (res.ok) {
+                const data = await res.json();
+                this.sheetsConfig.spreadsheet_id = data.spreadsheet_id || '';
+                this.sheetsConfig.auto_sync = data.auto_sync || false;
+                this.sheetsConfig.has_credentials = data.has_credentials || false;
+            }
+        } catch (err) {
+            console.error('Lỗi khi tải cấu hình Sheets:', err);
+        }
+    },
+    
+    async saveSheetsConfig() {
+        if (!this.sheetsConfig.spreadsheet_id) {
+            window.showToast('Vui lòng nhập Spreadsheet ID', 'warning');
+            return;
+        }
+        if (!this.sheetsConfig.credentials_json && !this.sheetsConfig.has_credentials) {
+            window.showToast('Vui lòng paste nội dung Service Account JSON', 'warning');
+            return;
+        }
+        this.sheetsSaving = true;
+        try {
+            const body = {
+                spreadsheet_id: this.sheetsConfig.spreadsheet_id,
+                credentials_json: this.sheetsConfig.credentials_json || '__KEEP_EXISTING__',
+                auto_sync: this.sheetsConfig.auto_sync
+            };
+            const res = await fetch('/api/v1/settings/integrations/google-sheets/config', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+            if (!res.ok) throw new Error('API Error');
+            await this.loadSheetsConfig();
+            this.sheetsConfig.credentials_json = '';
+            window.showToast('Đã lưu cấu hình Google Sheets!', 'success');
+        } catch (err) {
+            window.showToast('Lỗi: ' + err.message, 'error');
+        } finally {
+            this.sheetsSaving = false;
+        }
+    },
+    
+    async testSheetsConnection() {
+        this.sheetsTesting = true;
+        try {
+            const res = await fetch('/api/v1/settings/integrations/google-sheets/test', { method: 'POST' });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.detail || 'Test failed');
+            window.showToast(data.message, 'success');
+        } catch (err) {
+            window.showToast(err.message, 'error');
+        } finally {
+            this.sheetsTesting = false;
+        }
+    },
+    
+    async syncAllHistory() {
+        if (!confirm('Bạn có muốn đồng bộ toàn bộ các bài đăng thành công từ trước tới nay (Website, Fanpage, Seeding) vào Google Sheets không?')) return;
+        this.sheetsSyncing = true;
+        try {
+            const res = await fetch('/api/v1/settings/integrations/google-sheets/sync-history', { method: 'POST' });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.detail || 'Sync failed');
+            window.showToast(`Đã đồng bộ ${data.synced_count} bài đăng vào Google Sheets!`, 'success');
+            if (data.spreadsheet_url) {
+                window.open(data.spreadsheet_url, '_blank');
+            }
+        } catch (err) {
+            window.showToast(err.message, 'error');
+        } finally {
+            this.sheetsSyncing = false;
+        }
+    },
+    
+    openSpreadsheet() {
+        if (!this.sheetsConfig.spreadsheet_id) {
+            window.showToast('Chưa có Spreadsheet ID', 'warning');
+            return;
+        }
+        window.open(`https://docs.google.com/spreadsheets/d/${this.sheetsConfig.spreadsheet_id}`, '_blank');
+    },
+    
     async connectGoogleAuth() {
         const data = this.getIntegration('GoogleAnalytics');
         if (!data.url || !data.username || !data.access_token) {
@@ -305,6 +396,12 @@
                 :class="activeTab === 'ga4' ? 'text-amber-400 bg-white/[0.03]' : 'text-slate-400 hover:text-slate-200 hover:bg-white/[0.01]'">
             Google Analytics 4
             <div x-show="activeTab === 'ga4'" class="absolute bottom-0 left-0 w-full h-[2px] bg-amber-400"></div>
+        </button>
+        <button @click="activeTab = 'sheets'" 
+                class="px-5 py-2.5 rounded-t-lg font-medium transition-all duration-200 relative"
+                :class="activeTab === 'sheets' ? 'text-green-400 bg-white/[0.03]' : 'text-slate-400 hover:text-slate-200 hover:bg-white/[0.01]'">
+            Google Sheets
+            <div x-show="activeTab === 'sheets'" class="absolute bottom-0 left-0 w-full h-[2px] bg-green-400"></div>
         </button>
     </div>
 
@@ -580,6 +677,82 @@
                 </div>
             </div>
             
+            <!-- TAB: GOOGLE SHEETS -->
+            <div x-show="activeTab === 'sheets'" x-cloak x-transition:enter="transition ease-out duration-200" x-transition:enter-start="opacity-0 translate-y-2" x-transition:enter-end="opacity-100 translate-y-0" class="glass-card p-6">
+                <div class="flex items-center justify-between mb-6">
+                    <div>
+                        <h3 class="text-xl font-semibold text-green-400">📊 Google Sheets — Báo cáo Tổng hợp Bài đăng</h3>
+                        <p class="text-sm text-slate-400 mt-1">Tự động ghi nhận link các bài đăng thành công (Website WordPress, Facebook Fanpage, Seeding Hội nhóm) vào Google Sheets để báo cáo và đánh giá hàng tháng</p>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <span class="text-sm text-slate-400">Tự động ghi</span>
+                        <label class="relative inline-flex items-center cursor-pointer">
+                            <input type="checkbox" x-model="sheetsConfig.auto_sync" class="sr-only peer">
+                            <div class="w-11 h-6 bg-slate-700 rounded-full peer peer-checked:bg-green-500 transition-colors"></div>
+                            <div class="absolute left-[2px] top-[2px] bg-white w-5 h-5 rounded-full transition-transform peer-checked:translate-x-5"></div>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="space-y-5">
+                    <!-- Spreadsheet ID -->
+                    <div>
+                        <label class="block text-sm font-medium text-slate-300 mb-2">Spreadsheet ID</label>
+                        <input type="text" x-model="sheetsConfig.spreadsheet_id"
+                               class="w-full px-4 py-2.5 bg-white/5 border border-white/10 rounded-lg text-slate-200 focus:ring-2 focus:ring-green-500/30 focus:border-green-500/50"
+                               placeholder="1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms">
+                        <p class="text-xs text-slate-500 mt-1">Lấy từ URL Google Sheet: https://docs.google.com/spreadsheets/d/<span class="text-green-400 font-mono">SPREADSHEET_ID</span>/edit</p>
+                    </div>
+
+                    <!-- Service Account JSON -->
+                    <div>
+                        <label class="block text-sm font-medium text-slate-300 mb-2">Service Account JSON</label>
+                        <div x-show="sheetsConfig.has_credentials" class="flex items-center gap-2 mb-2 text-sm text-green-400">
+                            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg>
+                            Đã có credentials. Paste lại nếu muốn cập nhật.
+                        </div>
+                        <textarea x-model="sheetsConfig.credentials_json" rows="4"
+                                  class="w-full px-4 py-2.5 bg-white/5 border border-white/10 rounded-lg text-slate-200 font-mono text-xs focus:ring-2 focus:ring-green-500/30 focus:border-green-500/50"
+                                  :placeholder="sheetsConfig.has_credentials ? 'Để trống nếu không muốn thay đổi...' : 'Paste nội dung file JSON từ Google Cloud Console...'"></textarea>
+                        <p class="text-xs text-slate-500 mt-1">Lấy từ Google Cloud Console → IAM → Service Accounts → Keys → Create new key (JSON)</p>
+                    </div>
+
+                    <!-- Hướng dẫn -->
+                    <div class="bg-blue-500/10 border border-blue-500/20 rounded-lg p-4">
+                        <h4 class="text-sm font-medium text-blue-400 mb-2">📋 Cơ chế hoạt động</h4>
+                        <ol class="text-xs text-slate-400 space-y-1.5 list-decimal list-inside">
+                            <li>Chia sẻ (Share) Google Sheet với email của Service Account (quyền <strong>Editor</strong>).</li>
+                            <li>Khi bất kỳ bài viết nào được đăng thành công lên <strong>Website</strong> hoặc <strong>Fanpage</strong> (đăng ngay hoặc hẹn giờ), link bài viết sẽ <strong>tự động ghi ngay</strong> vào tab tháng tương ứng.</li>
+                            <li>Khi chiến dịch <strong>Seeding</strong> chạy thành công, link bài/nhóm cũng sẽ <strong>tự động ghi ngay</strong> mà không cần thao tác thêm.</li>
+                            <li>Hệ thống tự động cập nhật tab <strong>Tổng hợp</strong> để bạn theo dõi số lượng bài đăng và đánh giá hiệu quả từng tháng.</li>
+                        </ol>
+                    </div>
+
+                    <!-- Buttons -->
+                    <div class="flex flex-wrap items-center gap-3 pt-2">
+                        <button @click="saveSheetsConfig()" :disabled="sheetsSaving"
+                                class="px-5 py-2.5 bg-green-600 hover:bg-green-500 disabled:bg-green-600/50 text-white rounded-lg font-medium transition-colors">
+                            <span x-show="!sheetsSaving">💾 Lưu cấu hình</span>
+                            <span x-show="sheetsSaving">⏳ Đang lưu...</span>
+                        </button>
+                        <button @click="testSheetsConnection()" :disabled="sheetsTesting"
+                                class="px-5 py-2.5 bg-white/5 hover:bg-white/10 disabled:opacity-50 text-slate-200 border border-white/10 rounded-lg font-medium transition-colors">
+                            <span x-show="!sheetsTesting">🔗 Kiểm tra kết nối</span>
+                            <span x-show="sheetsTesting">⏳ Đang kiểm tra...</span>
+                        </button>
+                        <button @click="syncAllHistory()" :disabled="sheetsSyncing"
+                                class="px-5 py-2.5 bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 border border-blue-500/30 rounded-lg font-medium transition-colors">
+                            <span x-show="!sheetsSyncing">🔄 Đồng bộ tất cả bài đã đăng từ trước</span>
+                            <span x-show="sheetsSyncing">⏳ Đang đồng bộ lịch sử...</span>
+                        </button>
+                        <button x-show="sheetsConfig.spreadsheet_id" @click="openSpreadsheet()"
+                                class="px-4 py-2.5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 rounded-lg font-medium transition-colors flex items-center gap-1.5">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+                            Mở Google Sheet
+                        </button>
+                    </div>
+                </div>
+            </div>
         </div>
     </template>
 </div>

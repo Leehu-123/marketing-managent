@@ -7,6 +7,13 @@
     campaigns: [],
     loading: true,
     showModal: false,
+    showLogsModal: false,
+    logs: [],
+    logsLoading: false,
+    logsAutoRefresh: true,
+    logsInterval: null,
+    tasksInterval: null,
+    viewingCampaign: null,
     newCampaign: {
         name: '',
         platform: 'facebook',
@@ -26,34 +33,90 @@
     showTasksModal: false,
     campaignTasks: [],
     viewingCampaignName: '',
+    taskFilter: 'current',
+
+    filteredTasks() {
+        if (!this.viewingCampaign || !this.viewingCampaign.is_daily_repeat || this.taskFilter === 'all') {
+            return this.campaignTasks;
+        }
+        if (!this.campaignTasks || !this.campaignTasks.length) return [];
+        // Lọc các task thuộc ngày gần nhất
+        const dates = this.campaignTasks.map(t => (t.created_at || '').substring(0, 10)).filter(d => d);
+        if (!dates.length) return this.campaignTasks;
+        const latestDate = dates.sort().reverse()[0];
+        return this.campaignTasks.filter(t => (t.created_at || '').startsWith(latestDate));
+    },
     
+    isSaving: false,
     toolStatus: 'idle',
     toolShowBrowser: false,
-    toolCrashInfo: null,
-    toolStaleTasks: 0,
 
     async init() {
         await this.loadCampaigns();
         await this.loadAccounts();
         await this.checkToolStatus();
         
-        // Auto refresh tool status and campaigns periodically
+        // Auto refresh tool status and campaigns periodically (mỗi 3 giây)
         setInterval(() => {
             this.checkToolStatus();
             this.loadCampaigns(false); // background refresh
-        }, 5000);
+        }, 3000);
     },
 
     async viewTasks(camp) {
+        this.viewingCampaign = camp;
         this.viewingCampaignName = camp.name;
+        await this.fetchCampaignTasks(camp.id);
+        this.showTasksModal = true;
+        
+        if (this.tasksInterval) clearInterval(this.tasksInterval);
+        this.tasksInterval = setInterval(async () => {
+            if (this.showTasksModal) {
+                await this.fetchCampaignTasks(camp.id);
+            } else {
+                clearInterval(this.tasksInterval);
+            }
+        }, 3000);
+    },
+
+    async fetchCampaignTasks(campId) {
         try {
-            const res = await fetch(`/api/v1/seeding/campaigns/${camp.id}/tasks`);
+            const res = await fetch(`/api/v1/seeding/campaigns/${campId}/tasks`);
             if (res.ok) {
                 this.campaignTasks = await res.json();
-                this.showTasksModal = true;
+            }
+        } catch (e) {}
+    },
+
+    async viewToolLogs() {
+        this.showLogsModal = true;
+        await this.fetchToolLogs();
+        if (this.logsInterval) clearInterval(this.logsInterval);
+        this.logsInterval = setInterval(() => {
+            if (this.showLogsModal && this.logsAutoRefresh) {
+                this.fetchToolLogs();
+            } else if (!this.showLogsModal) {
+                clearInterval(this.logsInterval);
+            }
+        }, 3000);
+    },
+
+    async fetchToolLogs() {
+        this.logsLoading = true;
+        try {
+            const res = await fetch('/api/v1/seeding/tool/logs?limit=100');
+            if (res.ok) {
+                const data = await res.json();
+                this.logs = data.logs || [];
+                this.$nextTick(() => {
+                    const el = document.getElementById('tool-logs-container');
+                    if (el) el.scrollTop = el.scrollHeight;
+                });
             }
         } catch (e) {
-            window.showToast('Lỗi khi tải chi tiết', 'error');
+            console.error(e);
+        } finally {
+            this.logsLoading = false;
         }
     },
 
@@ -63,12 +126,6 @@
             if (res.ok) {
                 const data = await res.json();
                 this.toolStatus = data.status;
-                this.toolStaleTasks = data.stale_tasks_count || 0;
-                this.toolCrashInfo = {
-                    lastCrashAt: data.last_crash_at,
-                    autoRestartCount: data.auto_restart_count || 0,
-                    toolStartedAt: data.tool_started_at,
-                };
             }
         } catch (e) {}
     },
@@ -105,23 +162,6 @@
         } catch (e) {}
     },
 
-    async recoverCampaign(campId) {
-        try {
-            const res = await fetch(`/api/v1/seeding/campaigns/${campId}/recover`, {
-                method: 'POST'
-            });
-            const data = await res.json();
-            if (res.ok && data.status === 'success') {
-                window.showToast(data.message);
-                await this.loadCampaigns();
-            } else {
-                window.showToast(data.message || 'Không có task nào bị kẹt', 'info');
-            }
-        } catch (e) {
-            window.showToast('Lỗi khi khôi phục', 'error');
-        }
-    },
-
     async loadAccounts() {
         try {
             const res = await fetch('/api/v1/seeding/accounts');
@@ -139,55 +179,11 @@
             const res = await fetch('/api/v1/seeding/campaigns');
             if (res.ok) {
                 this.campaigns = await res.json();
-            } else if (res.status === 401) {
-                window.location.href = '/login';
-            } else {
-                console.error('Lỗi khi tải chiến dịch, mã lỗi:', res.status);
             }
         } catch (e) {
-            console.error('Lỗi kết nối khi tải chiến dịch:', e);
+            console.error(e);
         } finally {
             if (showLoading) this.loading = false;
-        }
-    },
-    
-    parseUrls(urlsStr) {
-        if (!urlsStr) return [];
-        try {
-            const parsed = JSON.parse(urlsStr);
-            return Array.isArray(parsed) ? parsed : [parsed];
-        } catch(e) {
-            return [urlsStr];
-        }
-    },
-    
-    formatDate(d) {
-        if (!d) return 'Chưa có';
-        try {
-            const dt = new Date(d);
-            return isNaN(dt.getTime()) ? 'Chưa có' : dt.toLocaleString('vi-VN');
-        } catch(e) {
-            return 'Chưa có';
-        }
-    },
-    
-    formatDateOnly(d) {
-        if (!d) return 'Chưa có';
-        try {
-            const dt = new Date(d);
-            return isNaN(dt.getTime()) ? 'Chưa có' : dt.toLocaleDateString('vi-VN');
-        } catch(e) {
-            return 'Chưa có';
-        }
-    },
-    
-    formatTimeOnly(d) {
-        if (!d) return '';
-        try {
-            const dt = new Date(d);
-            return isNaN(dt.getTime()) ? '' : dt.toLocaleTimeString('vi-VN');
-        } catch(e) {
-            return '';
         }
     },
     
@@ -227,18 +223,21 @@
         this.showModal = true;
     },
     
-    async saveCampaign() {
+    async saveCampaign(shouldRerun = false) {
+        if (this.isSaving) return;
         if(!this.newCampaign.name || !this.newCampaign.target_urls) {
             window.showToast('Vui lòng nhập tên chiến dịch và link mục tiêu', 'error');
             return;
         }
+        this.isSaving = true;
         try {
             let urls = this.newCampaign.target_urls.split('\n').map(u => u.trim()).filter(u => u);
             let payload = {
                 ...this.newCampaign,
                 target_urls: JSON.stringify(urls),
                 account_ids: JSON.stringify(this.newCampaign.account_ids),
-                media_urls: JSON.stringify(this.newCampaign.media_urls)
+                media_urls: JSON.stringify(this.newCampaign.media_urls),
+                rerun: shouldRerun
             };
             
             const url = this.editingId ? `/api/v1/seeding/campaigns/${this.editingId}` : '/api/v1/seeding/campaigns';
@@ -250,13 +249,78 @@
                 body: JSON.stringify(payload)
             });
             if (res.ok) {
-                window.showToast(this.editingId ? 'Cập nhật chiến dịch thành công!' : 'Khởi tạo chiến dịch thành công!');
+                window.showToast(this.editingId ? (shouldRerun ? 'Đã lưu và kích hoạt chạy lại chiến dịch!' : 'Cập nhật chiến dịch thành công!') : 'Khởi tạo chiến dịch thành công!');
                 this.showModal = false;
                 this.editingId = null;
-                this.newCampaign = {name: '', platform: 'facebook', campaign_type: 'COMMENT', target_urls: '', ai_instructions: '', account_ids: []};
+                this.newCampaign = {name: '', platform: 'facebook', campaign_type: 'COMMENT', target_urls: '', ai_instructions: '', account_ids: [], post_content: '', media_urls: [], daily_schedule_time: '', is_daily_repeat: false};
                 await this.loadCampaigns();
+                if (shouldRerun && this.toolStatus !== 'running') {
+                    await this.startTool();
+                }
             } else {
                 window.showToast('Lỗi khi lưu chiến dịch', 'error');
+            }
+        } catch (e) {
+            window.showToast('Lỗi hệ thống', 'error');
+        } finally {
+            this.isSaving = false;
+        }
+    },
+
+    async rerunCampaign(campId) {
+        if(!confirm('Bạn có chắc muốn chạy lại chiến dịch này từ đầu? Tất cả nhiệm vụ sẽ được tạo mới và bắt đầu chạy.')) return;
+        try {
+            const res = await fetch(`/api/v1/seeding/campaigns/${campId}/rerun`, { method: 'POST' });
+            const data = await res.json();
+            if (res.ok) {
+                window.showToast(data.message || 'Đã kích hoạt chạy lại chiến dịch!');
+                await this.loadCampaigns();
+                if (this.toolStatus !== 'running') {
+                    await this.startTool();
+                }
+            } else {
+                window.showToast('Lỗi: ' + (data.detail || 'Không xác định'), 'error');
+            }
+        } catch (e) {
+            window.showToast('Lỗi kết nối', 'error');
+        }
+    },
+
+    async toggleDailyRepeat(campId, enable) {
+        const actionText = enable ? 'bật lại lịch đăng hàng ngày' : 'dừng lịch đăng hàng ngày';
+        if(!confirm(`Bạn có chắc muốn ${actionText} cho chiến dịch này?`)) return;
+        try {
+            const res = await fetch(`/api/v1/seeding/campaigns/${campId}/toggle-daily`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ is_daily_repeat: enable })
+            });
+            const data = await res.json();
+            if (res.ok) {
+                window.showToast(data.message || 'Cập nhật lịch thành công');
+                await this.loadCampaigns();
+            } else {
+                window.showToast('Lỗi: ' + (data.detail || 'Không xác định'), 'error');
+            }
+        } catch (e) {
+            window.showToast('Lỗi kết nối', 'error');
+        }
+    },
+
+    async runNow(campId) {
+        if(!confirm('Bạn muốn chạy ngay chiến dịch này?')) return;
+        try {
+            const res = await fetch(`/api/v1/seeding/campaigns/${campId}/run-now`, { method: 'POST' });
+            const data = await res.json();
+            if (res.ok) {
+                window.showToast(data.message || 'Đã kích hoạt chiến dịch!');
+                await this.loadCampaigns();
+                // Tự khởi động tool nếu chưa chạy
+                if (this.toolStatus !== 'running') {
+                    await this.startTool();
+                }
+            } else {
+                window.showToast('Lỗi: ' + (data.detail || 'Không xác định'), 'error');
             }
         } catch (e) {
             window.showToast('Lỗi hệ thống', 'error');
@@ -308,52 +372,6 @@
         this.newCampaign.media_urls.splice(index, 1);
     },
     
-    async triggerDaily(camp) {
-        if(!confirm(`Bạn có muốn kích hoạt chạy ngay một đợt bài đăng mới cho chiến dịch '${camp.name}' không?`)) return;
-        window.showToast('Đang kích hoạt đợt chạy mới...', 'info');
-        try {
-            const res = await fetch(`/api/v1/seeding/campaigns/${camp.id}/trigger-daily`, {
-                method: 'POST'
-            });
-            const data = await res.json();
-            if (res.ok) {
-                window.showToast(data.message || 'Đã kích hoạt thành công!', 'success');
-                await this.loadCampaigns();
-            } else {
-                window.showToast(data.detail || 'Lỗi khi kích hoạt', 'error');
-            }
-        } catch (e) {
-            window.showToast('Lỗi kết nối', 'error');
-        }
-    },
-    
-    getGroupedTasks() {
-        const groups = {};
-        const todayStr = new Date().toLocaleDateString('vi-VN');
-        for (const task of (this.campaignTasks || [])) {
-            let dateKey = 'Không xác định';
-            if (task.created_at) {
-                const d = new Date(task.created_at);
-                const dStr = isNaN(d.getTime()) ? 'Không xác định' : d.toLocaleDateString('vi-VN');
-                dateKey = (dStr === todayStr) ? `Hôm nay (${dStr})` : `Ngày ${dStr}`;
-            }
-            if (!groups[dateKey]) {
-                groups[dateKey] = {
-                    dateLabel: dateKey,
-                    tasks: [],
-                    successCount: 0,
-                    failedCount: 0,
-                    pendingCount: 0
-                };
-            }
-            groups[dateKey].tasks.push(task);
-            if (task.status === 'success') groups[dateKey].successCount++;
-            else if (task.status === 'failed') groups[dateKey].failedCount++;
-            else groups[dateKey].pendingCount++;
-        }
-        return Object.values(groups);
-    },
-    
     async generateReplies(campId) {
         if (!campId) {
             window.showToast('Vui lòng lưu chiến dịch trước', 'error');
@@ -385,41 +403,26 @@
     </div>
 
     <!-- Bảng điều khiển Tool Automation -->
-    <div class="bg-surface-secondary border border-slate-700 rounded-xl p-5 flex flex-col gap-4">
-        <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-            <div>
-                <h3 class="font-semibold text-white mb-1">🤖 Client Automation Tool</h3>
-                <p class="text-sm text-slate-400">Trạng thái: 
-                    <span x-show="toolStatus === 'running'" class="text-emerald-400 font-medium ml-1">● Đang chạy</span>
-                    <span x-show="toolStatus !== 'running'" class="text-slate-500 font-medium ml-1">○ Đang tắt</span>
-                    <span x-show="toolStaleTasks > 0" class="text-amber-400 font-medium ml-2">⚠ <span x-text="toolStaleTasks"></span> task đang xử lý</span>
-                </p>
-            </div>
-            <div class="flex items-center gap-4">
-                <button x-show="toolStatus !== 'running'" @click="startTool()" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition font-medium flex items-center gap-2">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
-                    Khởi động Tool
-                </button>
-                <button x-show="toolStatus === 'running'" @click="stopTool()" class="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-lg transition font-medium flex items-center gap-2">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="none"><rect x="6" y="6" width="12" height="12"></rect></svg>
-                    Dừng Tool
-                </button>
-            </div>
+    <div class="bg-surface-secondary border border-slate-700 rounded-xl p-5 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        <div>
+            <h3 class="font-semibold text-white mb-1">🤖 Client Automation Tool</h3>
+            <p class="text-sm text-slate-400">Trạng thái: 
+                <span x-show="toolStatus === 'running'" class="text-emerald-400 font-medium ml-1">● Đang chạy</span>
+                <span x-show="toolStatus !== 'running'" class="text-slate-500 font-medium ml-1">○ Đang tắt</span>
+            </p>
         </div>
-        <!-- Crash notification banner -->
-        <div x-show="toolCrashInfo && toolCrashInfo.lastCrashAt" class="bg-amber-900/30 border border-amber-700/50 rounded-lg p-3 flex items-center justify-between">
-            <div class="flex items-center gap-2">
-                <span class="text-amber-400 text-lg">⚠️</span>
-                <div>
-                    <p class="text-amber-300 text-sm font-medium">Tool đã bị crash/dừng đột ngột</p>
-                    <p class="text-amber-400/70 text-xs">
-                        Lần crash gần nhất: <span x-text="toolCrashInfo.lastCrashAt ? new Date(toolCrashInfo.lastCrashAt).toLocaleString('vi-VN') : 'N/A'"></span>
-                        · Auto-restart: <span x-text="toolCrashInfo.autoRestartCount"></span>/3 lần
-                    </p>
-                </div>
-            </div>
-            <button x-show="toolStatus !== 'running'" @click="startTool()" class="px-3 py-1 bg-amber-600 hover:bg-amber-700 text-white text-sm rounded-lg transition">
-                Khởi động lại
+        <div class="flex items-center gap-3">
+            <button @click="viewToolLogs()" class="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600 rounded-lg transition font-medium text-sm flex items-center gap-1.5">
+                <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+                Nhật ký Tool
+            </button>
+            <button x-show="toolStatus !== 'running'" @click="startTool()" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition font-medium flex items-center gap-2">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+                Khởi động Tool
+            </button>
+            <button x-show="toolStatus === 'running'" @click="stopTool()" class="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-lg transition font-medium flex items-center gap-2">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="none"><rect x="6" y="6" width="12" height="12"></rect></svg>
+                Dừng Tool
             </button>
         </div>
     </div>
@@ -433,72 +436,146 @@
         </template>
         
         <template x-for="camp in campaigns" :key="camp.id">
-            <div class="bg-surface-secondary border border-slate-700/50 rounded-xl p-5 hover:border-slate-500 transition">
-                <div class="flex justify-between items-start mb-3">
-                    <h3 class="font-semibold text-white text-lg" x-text="camp.name"></h3>
-                    <div class="flex items-center gap-1.5">
-                        <span class="px-2 py-0.5 text-xs rounded bg-slate-800 text-slate-300" x-text="camp.platform"></span>
-                        <span class="px-2 py-0.5 text-xs rounded" :class="{
-                            'bg-blue-500/10 text-blue-400': camp.campaign_type === 'COMMENT',
-                            'bg-purple-500/10 text-purple-400': camp.campaign_type === 'REPLY_COMMENT',
-                            'bg-amber-500/10 text-amber-400': camp.campaign_type === 'POST_GROUP'
-                        }" x-text="{'COMMENT': '💬 Comment', 'REPLY_COMMENT': '↩️ Reply', 'POST_GROUP': '📢 Nhóm'}[camp.campaign_type] || camp.campaign_type"></span>
-                        <span x-show="camp.is_daily_repeat" class="px-2 py-0.5 text-xs rounded bg-emerald-500/10 text-emerald-400">🔄 <span x-text="camp.daily_schedule_time"></span></span>
+            <div class="bg-surface-secondary border border-slate-700/50 rounded-xl p-5 hover:border-slate-500 transition flex flex-col justify-between">
+                <div>
+                    <div class="flex justify-between items-start mb-3">
+                        <h3 class="font-semibold text-white text-lg" x-text="camp.name"></h3>
+                        <div class="flex flex-wrap items-center gap-1.5">
+                            <span class="px-2 py-0.5 text-xs rounded bg-slate-800 text-slate-300" x-text="camp.platform"></span>
+                            <span class="px-2 py-0.5 text-xs rounded" :class="{
+                                'bg-blue-500/10 text-blue-400': camp.campaign_type === 'COMMENT',
+                                'bg-purple-500/10 text-purple-400': camp.campaign_type === 'REPLY_COMMENT',
+                                'bg-amber-500/10 text-amber-400': camp.campaign_type === 'POST_GROUP'
+                            }" x-text="{'COMMENT': '💬 Comment', 'REPLY_COMMENT': '↩️ Reply', 'POST_GROUP': '📢 Nhóm'}[camp.campaign_type] || camp.campaign_type"></span>
+                            <span x-show="camp.is_daily_repeat" class="px-2 py-0.5 text-xs rounded bg-emerald-500/10 text-emerald-400 font-medium border border-emerald-500/20" title="Đang bật lặp lại hàng ngày">🔄 <span x-text="camp.daily_schedule_time"></span></span>
+                            <span x-show="!camp.is_daily_repeat && camp.daily_schedule_time" class="px-2 py-0.5 text-xs rounded bg-amber-500/10 text-amber-400 font-medium border border-amber-500/20" title="Đã tạm dừng lịch lặp lại hàng ngày">⏸️ Tạm dừng: <span x-text="camp.daily_schedule_time"></span></span>
+                        </div>
+                    </div>
+                    <div class="text-sm text-slate-400 mb-4 line-clamp-2" x-text="camp.ai_instructions"></div>
+                    
+                    <!-- Danh sách link mục tiêu -->
+                    <div class="mb-4 space-y-1" x-data="{ 
+                        getUrls() { 
+                            try { return JSON.parse(camp.target_urls); } 
+                            catch(e) { return camp.target_urls ? [camp.target_urls] : []; } 
+                        } 
+                    }">
+                        <p class="text-xs text-slate-500 font-medium uppercase tracking-wider mb-2">Link mục tiêu (<span x-text="getUrls().length"></span>)</p>
+                        <div class="max-h-24 overflow-y-auto space-y-1.5 pr-1">
+                            <template x-for="url in getUrls()">
+                                <a :href="url" target="_blank" class="block text-xs text-blue-400 hover:text-blue-300 hover:underline truncate bg-slate-800/50 p-1.5 rounded" x-text="url"></a>
+                            </template>
+                        </div>
+                    </div>
+                    
+                    <!-- Thanh tiến trình thời gian thực (Live Progress Bar) -->
+                    <div class="mb-4 pt-3 border-t border-slate-700/50">
+                        <!-- Trường hợp 1: Chiến dịch hàng ngày (Hiển thị nổi bật tiến trình LẦN CHẠY HIỆN TẠI) -->
+                        <div x-show="camp.is_daily_repeat && (camp.current_run_total > 0)" class="space-y-2">
+                            <div class="flex justify-between items-center text-xs">
+                                <span class="text-emerald-400 font-semibold flex items-center gap-1.5">
+                                    <span class="relative flex h-2 w-2">
+                                        <span x-show="camp.status === 'running'" class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                        <span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                                    </span>
+                                    📅 Lần chạy hôm nay (<span x-text="camp.current_run_date || 'Hiện tại'"></span>): 
+                                    <span class="text-white font-bold ml-1" x-text="`${(camp.current_run_completed || 0) + (camp.current_run_failed || 0)}/${camp.current_run_total} (${camp.current_run_percent || 0}%)`"></span>
+                                </span>
+                                <div class="flex items-center gap-1.5 text-[11px]">
+                                    <span class="text-emerald-400 font-medium" x-text="`${camp.current_run_completed || 0} xong`"></span>
+                                    <span x-show="camp.current_run_failed > 0" class="text-rose-400 font-medium" x-text="`• ${camp.current_run_failed} lỗi`"></span>
+                                </div>
+                            </div>
+                            
+                            <div class="w-full bg-slate-800 rounded-full h-2.5 overflow-hidden flex shadow-inner">
+                                <div class="bg-emerald-500 h-2.5 transition-all duration-500" :style="`width: ${((camp.current_run_completed || 0) / (camp.current_run_total || 1)) * 100}%`"></div>
+                                <div class="bg-rose-500 h-2.5 transition-all duration-500" :style="`width: ${((camp.current_run_failed || 0) / (camp.current_run_total || 1)) * 100}%`"></div>
+                                <div class="bg-amber-500/80 h-2.5 transition-all duration-500" :style="`width: ${((camp.current_run_in_progress || 0) / (camp.current_run_total || 1)) * 100}%`"></div>
+                            </div>
+
+                            <div class="flex justify-between items-center text-[11px] text-slate-400 pt-0.5">
+                                <span>Tổng tích luỹ qua các ngày:</span>
+                                <span class="text-slate-300 font-medium" x-text="`${camp.completed_tasks || 0}/${camp.total_tasks || 0} bài thành công`"></span>
+                            </div>
+                        </div>
+
+                        <!-- Trường hợp 2: Chiến dịch một lần thông thường -->
+                        <div x-show="!camp.is_daily_repeat && (camp.total_tasks > 0)">
+                            <div class="flex justify-between items-center text-xs mb-1.5">
+                                <span x-show="camp.status === 'running'" class="text-emerald-400 font-medium flex items-center gap-1.5">
+                                    <span class="relative flex h-2 w-2">
+                                        <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                        <span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                                    </span>
+                                    Đang chạy: <span x-text="`${(camp.completed_tasks || 0) + (camp.failed_tasks || 0)}/${camp.total_tasks} (${camp.progress_percent || 0}%)`"></span>
+                                </span>
+                                <span x-show="camp.status === 'completed'" class="text-blue-400 font-medium flex items-center gap-1">
+                                    <span>✅</span> Hoàn thành: <span x-text="`${camp.completed_tasks || 0}/${camp.total_tasks}`"></span>
+                                </span>
+                                <span x-show="camp.status === 'pending'" class="text-amber-400 font-medium flex items-center gap-1">
+                                    <span>⏳</span> Sẵn sàng: <span x-text="`${camp.total_tasks} tasks`"></span>
+                                </span>
+                                <span x-show="camp.status === 'failed'" class="text-rose-400 font-medium flex items-center gap-1">
+                                    <span>❌</span> Thất bại: <span x-text="`${camp.failed_tasks || 0}/${camp.total_tasks}`"></span>
+                                </span>
+
+                                <div class="flex items-center gap-1.5 text-[11px]">
+                                    <span class="text-emerald-400 font-medium" x-text="`${camp.completed_tasks || 0} xong`"></span>
+                                    <span x-show="camp.failed_tasks > 0" class="text-rose-400 font-medium" x-text="`• ${camp.failed_tasks} lỗi`"></span>
+                                </div>
+                            </div>
+                            
+                            <div class="w-full bg-slate-800 rounded-full h-2 overflow-hidden flex shadow-inner">
+                                <div class="bg-emerald-500 h-2 transition-all duration-500" :style="`width: ${((camp.completed_tasks || 0) / (camp.total_tasks || 1)) * 100}%`"></div>
+                                <div class="bg-rose-500 h-2 transition-all duration-500" :style="`width: ${((camp.failed_tasks || 0) / (camp.total_tasks || 1)) * 100}%`"></div>
+                                <div class="bg-amber-500/80 h-2 transition-all duration-500" :style="`width: ${((camp.in_progress_tasks || 0) / (camp.total_tasks || 1)) * 100}%`"></div>
+                            </div>
+                        </div>
                     </div>
                 </div>
-                <div class="text-sm text-slate-400 mb-4 line-clamp-2" x-text="camp.ai_instructions"></div>
                 
-                <!-- Khung theo dõi tiến độ hôm nay -->
-                <div class="mb-4 p-3 rounded-lg border text-xs" :class="{
-                    'bg-emerald-500/10 border-emerald-500/30 text-emerald-300': camp.today_total > 0 && camp.today_failed === 0 && camp.today_pending === 0,
-                    'bg-amber-500/10 border-amber-500/30 text-amber-300': camp.today_pending > 0 || (camp.status === 'running' && camp.today_total === 0),
-                    'bg-rose-500/10 border-rose-500/30 text-rose-300': camp.today_failed > 0,
-                    'bg-slate-800/80 border-slate-700 text-slate-300': camp.today_total === 0 && camp.today_pending === 0
-                }">
-                    <div class="flex items-center justify-between font-medium">
-                        <span class="flex items-center gap-1.5 truncate mr-1">
-                            <span x-show="camp.today_total > 0 && camp.today_failed === 0 && camp.today_pending === 0">✅</span>
-                            <span x-show="camp.today_pending > 0 || (camp.status === 'running' && camp.today_total === 0)">⏳</span>
-                            <span x-show="camp.today_failed > 0">⚠️</span>
-                            <span x-show="camp.today_total === 0 && camp.today_pending === 0">⏰</span>
-                            <span x-text="camp.today_status_label || 'Chưa chạy'"></span>
-                        </span>
-                        <button x-show="camp.is_daily_repeat || camp.campaign_type === 'POST_GROUP'" @click="triggerDaily(camp)" title="Chạy thêm một đợt bài đăng ngay bây giờ" class="shrink-0 px-2 py-0.5 rounded bg-slate-700 hover:bg-slate-600 text-white text-[11px] font-normal transition flex items-center gap-1">
-                            ⚡ Chạy ngay
-                        </button>
-                    </div>
-                    <div class="text-[11px] text-slate-400 mt-1 flex justify-between">
-                        <span>Lần chạy gần nhất: <strong class="text-slate-200" x-text="formatDate(camp.last_run_at)"></strong></span>
-                    </div>
-                </div>
-                
-                <!-- Danh sách link mục tiêu -->
-                <div class="mb-4 space-y-1">
-                    <p class="text-xs text-slate-500 font-medium uppercase tracking-wider mb-2">Link mục tiêu (<span x-text="parseUrls(camp.target_urls).length"></span>)</p>
-                    <div class="max-h-24 overflow-y-auto space-y-1.5 pr-1">
-                        <template x-for="url in parseUrls(camp.target_urls)" :key="url">
-                            <a :href="url" target="_blank" class="block text-xs text-blue-400 hover:text-blue-300 hover:underline truncate bg-slate-800/50 p-1.5 rounded" x-text="url"></a>
-                        </template>
-                    </div>
-                </div>
-                
-                <div class="flex items-center justify-between text-sm pt-2 border-t border-slate-700/50">
+                <div class="flex items-center justify-between text-sm pt-3 border-t border-slate-700/40 mt-auto">
                     <div class="flex items-center gap-1.5 text-slate-400 text-xs">
                         <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
-                        <span>Tạo: <span x-text="formatDateOnly(camp.created_at)"></span></span>
+                        <span x-text="new Date(camp.created_at).toLocaleDateString('vi-VN')"></span>
                     </div>
-                    <div class="flex items-center gap-1.5">
-                        <button @click="viewTasks(camp)" class="text-xs text-blue-400 hover:text-blue-300 font-medium px-2 py-1 rounded bg-blue-500/10 transition flex items-center gap-1">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
-                            Lịch sử
+                    <div class="flex flex-wrap items-center gap-1.5">
+                        <button @click="viewTasks(camp)" class="text-xs text-blue-400 hover:text-blue-300 font-medium px-2 py-1 rounded bg-blue-500/10 hover:bg-blue-500/20 transition flex items-center gap-1">
+                            <span>👁️</span> Tiến trình
                         </button>
-                        <button @click="editCampaign(camp)" class="text-xs text-amber-400 hover:text-amber-300 font-medium px-2 py-1 rounded bg-amber-500/10 transition">Sửa</button>
-                        <button x-show="camp.campaign_type === 'REPLY_COMMENT'" @click="generateReplies(camp.id)" class="text-xs text-purple-400 hover:text-purple-300 font-medium px-2 py-1 rounded bg-purple-500/10 transition">🤖 Reply</button>
+                        
+                        <!-- Yêu cầu 1: Nút Sửa luôn hiển thị khi chiến dịch không chạy -->
+                        <button x-show="camp.status !== 'running'" @click="editCampaign(camp)" class="text-xs text-rose-400 hover:text-rose-300 font-medium px-2 py-1 rounded bg-rose-500/10 hover:bg-rose-500/20 transition flex items-center gap-1">
+                            <span>✏️</span> Sửa
+                        </button>
+
+                        <!-- Yêu cầu 1: Nút Chạy lại cho chiến dịch completed/failed -->
+                        <button x-show="camp.status === 'completed' || camp.status === 'failed'" @click="rerunCampaign(camp.id)" class="text-xs text-amber-400 hover:text-amber-300 font-medium px-2 py-1 rounded bg-amber-500/10 hover:bg-amber-500/20 transition flex items-center gap-1" title="Khởi tạo lại tất cả task và chạy lại từ đầu">
+                            <span>🔄</span> Chạy lại
+                        </button>
+
+                        <!-- Nút Chạy ngay cho chiến dịch pending -->
+                        <button x-show="camp.status === 'pending'" @click="runNow(camp.id)" class="text-xs text-emerald-400 hover:text-emerald-300 font-medium px-2 py-1 rounded bg-emerald-500/10 hover:bg-emerald-500/20 transition flex items-center gap-1">
+                            <span>⚡</span> Chạy ngay
+                        </button>
+
+                        <!-- Yêu cầu 3: Nút Dừng chạy theo ngày -->
+                        <button x-show="camp.is_daily_repeat" @click="toggleDailyRepeat(camp.id, false)" class="text-xs text-amber-400 hover:text-amber-300 font-medium px-2 py-1 rounded bg-amber-500/10 hover:bg-amber-500/20 transition flex items-center gap-1" title="Dừng tự động chạy bài hàng ngày">
+                            <span>⏸️</span> Dừng ngày
+                        </button>
+
+                        <!-- Yêu cầu 3: Nút Bật lại chạy theo ngày -->
+                        <button x-show="!camp.is_daily_repeat && camp.daily_schedule_time" @click="toggleDailyRepeat(camp.id, true)" class="text-xs text-emerald-400 hover:text-emerald-300 font-medium px-2 py-1 rounded bg-emerald-500/10 hover:bg-emerald-500/20 transition flex items-center gap-1" title="Tiếp tục tự động chạy bài hàng ngày">
+                            <span>▶️</span> Bật ngày
+                        </button>
+
+                        <button x-show="camp.campaign_type === 'REPLY_COMMENT' && (camp.status === 'pending' || camp.status === 'failed')" @click="generateReplies(camp.id)" class="text-xs text-purple-400 hover:text-purple-300 font-medium px-2 py-1 rounded bg-purple-500/10 transition">🤖 Sinh Reply</button>
+                        
                         <button @click="deleteCampaign(camp.id)" class="text-xs text-slate-400 hover:text-red-400 font-medium px-2 py-1 rounded bg-slate-800 hover:bg-red-500/10 transition">Xoá</button>
-                        <button x-show="camp.status === 'running'" @click="recoverCampaign(camp.id)" class="text-xs text-amber-400 hover:text-amber-300 font-medium px-2 py-1 rounded bg-amber-500/10 transition" title="Reset tasks bị kẹt về trạng thái chờ">🔄 Khôi phục</button>
+                        
                         <span class="px-2 py-1 rounded font-medium text-xs cursor-pointer" @click="viewTasks(camp)" :class="{
                             'bg-amber-500/10 text-amber-500': camp.status == 'pending',
-                            'bg-emerald-500/10 text-emerald-500': camp.status == 'running',
+                            'bg-emerald-500/10 text-emerald-500 animate-pulse': camp.status == 'running',
                             'bg-blue-500/10 text-blue-500': camp.status == 'completed',
                             'bg-red-500/10 text-red-500': camp.status == 'failed'
                         }" x-text="camp.status"></span>
@@ -508,7 +585,7 @@
         </template>
     </div>
 
-    <!-- Modal Xem Lịch sử & Chi tiết Tasks theo Ngày -->
+    <!-- Modal Xem Tasks / Lỗi -->
     <template x-teleport="body">
         <div x-show="showTasksModal" class="fixed inset-0 z-50 overflow-y-auto" x-cloak>
             <div class="flex min-h-screen items-center justify-center p-4 text-center">
@@ -516,59 +593,133 @@
             <div class="relative inline-block w-full max-w-2xl p-6 my-8 text-left align-middle bg-surface-secondary border border-slate-700 rounded-xl shadow-2xl max-h-[85vh] flex flex-col">
                 <div class="flex justify-between items-center mb-4">
                     <div>
-                        <h3 class="text-xl font-heading text-white" x-text="`Lịch sử bài đăng: ${viewingCampaignName}`"></h3>
-                        <p class="text-xs text-slate-400 mt-0.5">Theo dõi lịch sử từng bài đăng được phân theo từng ngày</p>
+                        <h3 class="text-xl font-heading" x-text="`Chi tiết chiến dịch: ${viewingCampaignName}`"></h3>
+                        <p class="text-xs text-slate-400 mt-0.5">Tự động cập nhật mỗi 3s khi mở</p>
                     </div>
                     <button @click="showTasksModal = false" class="text-slate-400 hover:text-white"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button>
                 </div>
+
+                <!-- Bộ lọc theo lần chạy (cho chiến dịch lặp hàng ngày) -->
+                <div x-show="viewingCampaign && viewingCampaign.is_daily_repeat" class="flex items-center gap-2 mb-3">
+                    <button @click="taskFilter = 'current'" :class="taskFilter === 'current' ? 'bg-rose-600 text-white shadow' : 'bg-slate-800 text-slate-400 hover:text-white'" class="px-3 py-1.5 rounded-lg text-xs font-medium transition flex items-center gap-1.5">
+                        <span>📅 Lần chạy hiện tại</span>
+                        <span class="px-1.5 py-0.2 bg-black/30 rounded text-[10px]" x-text="filteredTasks().length"></span>
+                    </button>
+                    <button @click="taskFilter = 'all'" :class="taskFilter === 'all' ? 'bg-rose-600 text-white shadow' : 'bg-slate-800 text-slate-400 hover:text-white'" class="px-3 py-1.5 rounded-lg text-xs font-medium transition flex items-center gap-1.5">
+                        <span>📚 Tất cả lịch sử</span>
+                        <span class="px-1.5 py-0.2 bg-black/30 rounded text-[10px]" x-text="campaignTasks.length"></span>
+                    </button>
+                </div>
+
+                <!-- Thống kê tiến độ trực quan trong Modal -->
+                <div class="mb-4 bg-surface-input border border-slate-700 rounded-lg p-3 space-y-2">
+                    <div class="grid grid-cols-4 gap-2 text-center">
+                        <div class="bg-slate-800/60 rounded p-2">
+                            <span class="text-xs text-slate-400 block">Tổng số</span>
+                            <span class="text-lg font-bold text-white" x-text="filteredTasks().length"></span>
+                        </div>
+                        <div class="bg-emerald-500/10 rounded p-2 border border-emerald-500/20">
+                            <span class="text-xs text-emerald-400 block">Thành công</span>
+                            <span class="text-lg font-bold text-emerald-400" x-text="filteredTasks().filter(t => t.status === 'success').length"></span>
+                        </div>
+                        <div class="bg-rose-500/10 rounded p-2 border border-rose-500/20">
+                            <span class="text-xs text-rose-400 block">Thất bại</span>
+                            <span class="text-lg font-bold text-rose-400" x-text="filteredTasks().filter(t => t.status === 'failed').length"></span>
+                        </div>
+                        <div class="bg-amber-500/10 rounded p-2 border border-amber-500/20">
+                            <span class="text-xs text-amber-400 block">Đang chờ</span>
+                            <span class="text-lg font-bold text-amber-400" x-text="filteredTasks().filter(t => t.status !== 'success' && t.status !== 'failed').length"></span>
+                        </div>
+                    </div>
+                    <!-- Thanh tiến trình -->
+                    <div class="w-full bg-slate-800 rounded-full h-2 overflow-hidden flex shadow-inner">
+                        <div class="bg-emerald-500 h-2 transition-all duration-300" :style="`width: ${(filteredTasks().filter(t => t.status === 'success').length / (filteredTasks().length || 1)) * 100}%`"></div>
+                        <div class="bg-rose-500 h-2 transition-all duration-300" :style="`width: ${(filteredTasks().filter(t => t.status === 'failed').length / (filteredTasks().length || 1)) * 100}%`"></div>
+                    </div>
+                </div>
             
-                <div class="space-y-4 overflow-y-auto pr-2">
-                    <template x-for="group in getGroupedTasks()" :key="group.dateLabel">
-                        <div class="border border-slate-700/80 bg-slate-900/50 rounded-xl p-3 space-y-2.5">
-                            <!-- Date Header & Summary Badge -->
-                            <div class="flex justify-between items-center border-b border-slate-800 pb-2">
-                                <span class="font-semibold text-sm text-slate-200 flex items-center gap-1.5">
-                                    📅 <span x-text="group.dateLabel"></span>
-                                </span>
-                                <div class="flex items-center gap-1.5 text-xs">
-                                    <span class="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 font-medium" x-text="`✅ ${group.successCount} thành công`"></span>
-                                    <span x-show="group.failedCount > 0" class="px-2 py-0.5 rounded bg-rose-500/10 text-rose-400 font-medium" x-text="`❌ ${group.failedCount} lỗi`"></span>
-                                    <span x-show="group.pendingCount > 0" class="px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 font-medium" x-text="`⏳ ${group.pendingCount} đang chờ`"></span>
-                                </div>
+                <div class="space-y-3 overflow-y-auto pr-2">
+                    <template x-for="task in filteredTasks()" :key="task.id">
+                        <div class="bg-surface-input border border-slate-700 rounded-lg p-3">
+                            <div class="flex justify-between items-start mb-2">
+                                <a :href="task.target_url" target="_blank" class="text-sm text-blue-400 hover:underline truncate mr-2" x-text="task.target_url"></a>
+                                <span class="px-2 py-0.5 rounded text-xs font-medium shrink-0" :class="{
+                                    'bg-amber-500/10 text-amber-500': task.status == 'pending',
+                                    'bg-emerald-500/10 text-emerald-500': task.status == 'success',
+                                    'bg-red-500/10 text-red-500': task.status == 'failed'
+                                }" x-text="task.status"></span>
                             </div>
-                            
-                            <!-- Task Items of this day -->
-                            <div class="space-y-2">
-                                <template x-for="task in group.tasks" :key="task.id">
-                                    <div class="bg-surface-input border border-slate-700 rounded-lg p-3">
-                                        <div class="flex justify-between items-start mb-1">
-                                            <a :href="task.target_url" target="_blank" class="text-sm text-blue-400 hover:underline truncate mr-2" x-text="task.target_url"></a>
-                                            <span class="px-2 py-0.5 rounded text-xs font-medium shrink-0" :class="{
-                                                'bg-amber-500/10 text-amber-500': task.status == 'pending',
-                                                'bg-emerald-500/10 text-emerald-500': task.status == 'success',
-                                                'bg-red-500/10 text-red-500': task.status == 'failed'
-                                            }" x-text="task.status"></span>
-                                        </div>
-                                        <div class="text-[11px] text-slate-400 flex items-center gap-3 mb-1">
-                                            <span x-show="task.executed_at">🕒 Thực thi lúc: <strong class="text-slate-300" x-text="new Date(task.executed_at).toLocaleTimeString('vi-VN')"></strong></span>
-                                            <span x-show="!task.executed_at && task.created_at">🕒 Tạo lúc: <strong class="text-slate-300" x-text="new Date(task.created_at).toLocaleTimeString('vi-VN')"></strong></span>
-                                        </div>
-                                        <div x-show="task.error_message" class="text-sm text-red-400 bg-red-500/10 p-2 rounded mt-2 border border-red-500/20">
-                                            <strong>Lỗi:</strong> <span x-text="task.error_message"></span>
-                                        </div>
-                                        <div x-show="task.generated_content && task.status == 'success'" class="text-sm text-emerald-400 bg-emerald-500/10 p-2 rounded mt-2 border border-emerald-500/20">
-                                            <strong>Nội dung:</strong> <span x-text="task.generated_content"></span>
-                                        </div>
-                                    </div>
-                                </template>
+                            <div x-show="task.error_message" class="text-sm text-red-400 bg-red-500/10 p-2 rounded mt-2 border border-red-500/20">
+                                <strong>Lỗi:</strong> <span x-text="task.error_message"></span>
+                            </div>
+                            <div x-show="task.generated_content && task.status == 'success'" class="text-sm text-emerald-400 bg-emerald-500/10 p-2 rounded mt-2 border border-emerald-500/20">
+                                <strong>Nội dung:</strong> <span x-text="task.generated_content"></span>
                             </div>
                         </div>
                     </template>
-                    <template x-if="campaignTasks.length === 0">
-                        <div class="text-slate-400 text-center py-4">Chưa có dữ liệu task nào.</div>
+                    <template x-if="filteredTasks().length === 0">
+                        <div class="text-slate-400 text-center py-4">Chưa có dữ liệu task trong mục này.</div>
                     </template>
                 </div>
             </div>
+            </div>
+        </div>
+    </template>
+
+    <!-- Modal Nhật ký Tool Automation (Live Console) -->
+    <template x-teleport="body">
+        <div x-show="showLogsModal" class="fixed inset-0 z-50 overflow-y-auto" x-cloak>
+            <div class="flex min-h-screen items-center justify-center p-4 text-center">
+                <div class="fixed inset-0 bg-black/60 backdrop-blur-sm" @click="showLogsModal = false"></div>
+                <div class="relative inline-block w-full max-w-4xl p-6 my-8 text-left align-middle bg-surface-secondary border border-slate-700 rounded-xl shadow-2xl max-h-[90vh] flex flex-col">
+                    <div class="flex justify-between items-center mb-4">
+                        <div class="flex items-center gap-3">
+                            <h3 class="text-xl font-heading flex items-center gap-2">
+                                <span>📋</span> Nhật ký Tool Automation (Live Console)
+                            </h3>
+                            <span x-show="logsAutoRefresh" class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                                <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> Tự cập nhật (3s)
+                            </span>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <button @click="logsAutoRefresh = !logsAutoRefresh" class="px-2.5 py-1 text-xs rounded border transition" :class="logsAutoRefresh ? 'border-emerald-500/40 text-emerald-400 bg-emerald-500/10' : 'border-slate-600 text-slate-400 hover:text-white'">
+                                <span x-text="logsAutoRefresh ? '⏸ Tắt tự cuộn' : '▶ Bật tự cuộn'"></span>
+                            </button>
+                            <button @click="fetchToolLogs()" :disabled="logsLoading" class="px-2.5 py-1 text-xs rounded bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-600 transition flex items-center gap-1">
+                                <span :class="{'animate-spin': logsLoading}">🔄</span> Tải lại
+                            </button>
+                            <button @click="showLogsModal = false" class="text-slate-400 hover:text-white ml-2">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Console Box -->
+                    <div id="tool-logs-container" class="bg-slate-950 border border-slate-800 rounded-lg p-4 font-mono text-xs text-slate-300 h-[60vh] overflow-y-auto space-y-1 select-text">
+                        <template x-for="(line, idx) in logs" :key="idx">
+                            <div class="whitespace-pre-wrap break-all hover:bg-slate-900/50 py-0.5 px-1 rounded transition font-mono leading-relaxed"
+                                 :class="{
+                                     'text-rose-400 bg-rose-950/20': line.includes('ERROR') || line.includes('❌') || line.includes('Exception'),
+                                     'text-emerald-400': line.includes('SUCCESS') || line.includes('✅') || line.includes('thành công'),
+                                     'text-amber-400': line.includes('WARNING') || line.includes('⚠️') || line.includes('Chờ') || line.includes('duyệt'),
+                                     'text-cyan-400 font-semibold': line.includes('Task #') || line.includes('Poll #') || line.includes('SEEDING')
+                                 }"
+                                 x-text="line">
+                            </div>
+                        </template>
+                        <template x-if="logs.length === 0 && !logsLoading">
+                            <div class="text-slate-500 text-center py-12 font-mono">Chưa có nhật ký ghi nhận trong file tool_log.txt.</div>
+                        </template>
+                        <template x-if="logsLoading && logs.length === 0">
+                            <div class="text-slate-500 text-center py-12 font-mono">Đang tải nhật ký...</div>
+                        </template>
+                    </div>
+
+                    <div class="mt-3 flex justify-between items-center text-xs text-slate-400">
+                        <span>Đang hiển thị tối đa 100 dòng mới nhất từ <code class="text-slate-300">tool_log.txt</code></span>
+                        <span>Nhấn <kbd class="px-1.5 py-0.5 bg-slate-800 rounded border border-slate-700 text-slate-300">Esc</kbd> hoặc nút X để đóng</span>
+                    </div>
+                </div>
             </div>
         </div>
     </template>
@@ -614,8 +765,11 @@
                                     :checked="newCampaign.account_ids.includes(acc.id) || newCampaign.account_ids.includes(String(acc.id))"
                                     @change="if($el.checked) { newCampaign.account_ids.push(acc.id) } else { newCampaign.account_ids = newCampaign.account_ids.filter(id => id != acc.id) }"
                                     class="rounded border-slate-700 text-rose-500 focus:ring-rose-500 bg-surface-secondary">
-                                <span x-text="acc.username"></span>
-                                <span class="text-xs px-1.5 py-0.5 rounded-full bg-slate-800" :class="{'text-emerald-400': acc.status=='active', 'text-red-400': acc.status!='active'}" x-text="acc.status"></span>
+                                <div class="flex items-center gap-1.5 truncate">
+                                    <span class="font-medium text-slate-200" x-text="acc.username"></span>
+                                    <span x-show="acc.note" class="text-xs text-rose-300/90 bg-rose-500/10 px-1.5 py-0.5 rounded border border-rose-500/20 font-normal" x-text="acc.note"></span>
+                                </div>
+                                <span class="text-xs px-1.5 py-0.5 rounded-full bg-slate-800 shrink-0" :class="{'text-emerald-400': acc.status=='active', 'text-red-400': acc.status!='active'}" x-text="acc.status"></span>
                             </label>
                         </template>
                         <template x-if="accounts.filter(a => a.platform === newCampaign.platform).length === 0">
@@ -684,10 +838,18 @@
                 </div>
             </div>
             
-            <div class="mt-6 flex justify-end gap-3">
-                <button @click="showModal = false" class="px-4 py-2 text-slate-300 hover:text-white transition">Hủy</button>
-                <button @click="saveCampaign()" class="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-lg transition font-medium">Tạo Chiến Dịch</button>
-            </div>
+            <div class="mt-6 flex flex-wrap items-center justify-between gap-3 border-t border-slate-700/50 pt-4">
+                <button @click="showModal = false" class="px-4 py-2 text-slate-400 hover:text-white transition text-sm">Hủy</button>
+                <div class="flex items-center gap-2">
+                    <button x-show="editingId" @click="saveCampaign(true)" :disabled="isSaving" class="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-lg transition font-medium text-sm flex items-center gap-1.5 shadow-lg shadow-amber-900/20" title="Cập nhật nội dung và bắt đầu chạy lại chiến dịch ngay">
+                        <span>⚡</span>
+                        <span x-text="isSaving ? 'Đang xử lý...' : 'Lưu & Chạy lại ngay'"></span>
+                    </button>
+                    <button @click="saveCampaign(false)" :disabled="isSaving" class="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-lg transition font-medium text-sm flex items-center gap-1.5 shadow-lg shadow-rose-900/20">
+                        <span x-show="editingId">💾</span>
+                        <span x-text="isSaving ? 'Đang lưu...' : (editingId ? 'Lưu thay đổi' : 'Tạo Chiến Dịch')"></span>
+                    </button>
+                </div>
             </div>
             </div>
         </div>

@@ -39,6 +39,9 @@ class Post(Base):
     published_at = Column(DateTime, nullable=True)
     published_url = Column(String, nullable=True) # URL thực tế của bài đăng sau khi post thành công
 
+    # Đa ngôn ngữ (Polylang)
+    translations = Column(Text, nullable=True) # Lưu JSON dạng: {"en": {...}, "zh": {...}}
+
     # Quan hệ
     content_plan = relationship("ContentPlan", back_populates="post")
     metrics = relationship("AnalyticsMetric", back_populates="post", cascade="all, delete-orphan")

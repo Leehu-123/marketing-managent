@@ -1,12 +1,10 @@
 # ============================================================
 # Client Automation Tool - Configuration
 # ============================================================
+import os
 
 # URL của Backend Web Quản Lý
-# Khi chạy bên trong Docker container, dùng port 8000 (internal uvicorn port)
-# Khi chạy local, đổi thành http://127.0.0.1:8000 hoặc http://127.0.0.1:3007
-import os
-BACKEND_URL = os.environ.get("BACKEND_URL", "http://127.0.0.1:8000")
+BACKEND_URL = os.getenv("BACKEND_URL", "http://127.0.0.1:8000")
 
 # API Endpoints
 API_TASKS_FETCH = "/api/v1/seeding/tasks/fetch"
@@ -37,7 +35,7 @@ TASKS_PER_POLL = 10
 # Thời gian chờ giữa các lần poll khi hết task (giây)
 POLL_INTERVAL = 60
 
-# Facebook URL - dùng mbasic cho đăng bài (form HTML đơn giản, hoạt động tốt với headless)
+# Facebook URL - dùng mbasic cho automation (nhẹ, ít JS, dễ scrape)
 FB_MBASIC_URL = "https://mbasic.facebook.com"
 
 # User Agent pool - xoay vòng ngẫu nhiên (Dùng Desktop UA)

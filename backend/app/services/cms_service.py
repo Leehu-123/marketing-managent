@@ -27,6 +27,7 @@ class CMSService:
         meta_title: Optional[str] = None,
         meta_description: Optional[str] = None,
         media_url: Optional[str] = None,
+        translations: Optional[str] = None,
     ) -> dict:
         """
         Publish a blog post to the configured WordPress site.
@@ -37,6 +38,7 @@ class CMSService:
             meta_title: SEO meta title (used in Yoast/RankMath if configured).
             meta_description: SEO meta description.
             media_url: Optional featured image URL.
+            translations: JSON string containing translation data.
 
         Returns:
             dict with keys: success (bool), post_id (int|str), url (str), error (str|None)
@@ -56,14 +58,14 @@ class CMSService:
 
         if wp_setting and wp_setting.url and wp_setting.username and wp_setting.access_token:
             return await CMSService._real_publish(
-                title, body, meta_title, meta_description, media_url
+                title, body, meta_title, meta_description, media_url, translations
             )
 
         if settings.MOCK_CMS:
-            return CMSService._mock_publish(title, body, meta_title, meta_description)
+            return CMSService._mock_publish(title, body, meta_title, meta_description, translations)
         else:
             return await CMSService._real_publish(
-                title, body, meta_title, meta_description, media_url
+                title, body, meta_title, meta_description, media_url, translations
             )
 
     @staticmethod
@@ -72,6 +74,7 @@ class CMSService:
         body: str,
         meta_title: Optional[str],
         meta_description: Optional[str],
+        translations: Optional[str] = None,
     ) -> dict:
         """Simulate publishing a WordPress post in MOCK mode."""
         fake_post_id = random.randint(1000, 99999)
@@ -156,6 +159,7 @@ class CMSService:
         meta_title: Optional[str],
         meta_description: Optional[str],
         media_url: Optional[str],
+        translations: Optional[str] = None,
     ) -> dict:
         """Publish a post via the real WordPress REST API."""
         from app.core.database import SessionLocal
@@ -191,52 +195,47 @@ class CMSService:
             wp_api_url = f"{wp_api_url}/wp-json"
         endpoint = f"{wp_api_url}/wp/v2/posts"
 
-        # Build the post payload
-        post_data = {
-            "title": title,
-            "status": "publish",
-        }
-
-        # Include Yoast/RankMath SEO meta if available (via custom fields)
-        meta_fields = {}
-        if meta_title:
-            meta_fields["_yoast_wpseo_title"] = meta_title
-        if meta_description:
-            meta_fields["_yoast_wpseo_metadesc"] = meta_description
-        if meta_fields:
-            post_data["meta"] = meta_fields
-
         try:
             async with httpx.AsyncClient(timeout=60.0) as client:
-                
-                # 1. Xử lý Thumbnail (Featured Image)
+                p_data = {
+                    "title": title,
+                    "status": "publish",
+                    "content": body,
+                }
+
+                m_fields = {}
+                if meta_title: m_fields["_yoast_wpseo_title"] = meta_title
+                if meta_description: m_fields["_yoast_wpseo_metadesc"] = meta_description
+                if m_fields: p_data["meta"] = m_fields
+
+                # Upload thumbnail
                 if media_url:
                     wp_media = await CMSService._upload_media_to_wp(client, wp_api_url, wp_username, wp_app_password, media_url)
                     if wp_media and wp_media.get("id"):
-                        post_data["featured_media"] = wp_media["id"]
+                        p_data["featured_media"] = wp_media["id"]
                         
-                # 2. Xử lý Ảnh nội dung (Inline Images)
+                # Process inline images
                 import re
-                if body:
-                    upload_paths = set(re.findall(r'src=["\'](/?uploads/[^"\']+)["\']', body))
+                if p_data.get("content"):
+                    upload_paths = set(re.findall(r'src=["\'](/?uploads/[^"\']+)["\']', p_data["content"]))
                     for path in upload_paths:
                         wp_media = await CMSService._upload_media_to_wp(client, wp_api_url, wp_username, wp_app_password, path)
                         if wp_media and wp_media.get("source_url"):
-                            body = body.replace(path, wp_media["source_url"])
-                            
-                post_data["content"] = body
+                            p_data["content"] = p_data["content"].replace(path, wp_media["source_url"])
 
-                response = await client.post(
+                resp = await client.post(
                     endpoint,
-                    json=post_data,
+                    json=p_data,
                     auth=(wp_username, wp_app_password),
                     headers={"Content-Type": "application/json"},
                 )
-                response.raise_for_status()
-                data = response.json()
-
-                post_id = data.get("id", "unknown")
-                post_url = data.get("link", f"{wp_api_url}/?p={post_id}")
+                resp.raise_for_status()
+                if not resp.text.strip():
+                    return {"success": False, "error": "WordPress trả về trang trắng (WSOD). Có thể website đang bị lỗi hệ thống."}
+                
+                resp_data = resp.json()
+                post_id = resp_data.get("id")
+                post_url = resp_data.get("link", f"{wp_api_url}/?p={post_id}")
 
                 logger.info(f"[CMS] ✅ Published post '{title[:50]}' -> ID={post_id}, URL={post_url}")
                 return {

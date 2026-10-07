@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   web:
     build: .
@@ -7,13 +5,11 @@ services:
     restart: unless-stopped
     ports:
       - "3007:8000"
+    shm_size: '1gb'
     volumes:
       - ./dafa_glass.db:/app/dafa_glass.db
       - ./uploads:/app/uploads
-      - ./app:/app/app
-      - ./templates:/app/templates
-      - ./static:/app/static
-      - ../client_automation:/app/client_automation
+      - /var/www/marketing-management/client_automation:/app/client_automation
     env_file:
       - .env
     environment:

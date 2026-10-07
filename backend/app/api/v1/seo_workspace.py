@@ -112,7 +112,7 @@ def draft_section(req: DraftSectionRequest, db: Session = Depends(get_db)):
     if not post:
         raise HTTPException(status_code=404, detail="Không tìm thấy bài viết")
         
-    prompt = f"Viết nội dung chuẩn SEO cho mục (H2/H3) mang tiêu đề '{req.section_title}' trong bài viết '{post.title}'. Yêu cầu viết dài khoảng 200-300 chữ, có bôi đậm từ khóa quan trọng. Định dạng HTML (chỉ thẻ p, ul, li). Context bổ sung: {req.section_context}"
+    prompt = f"Bạn là chuyên gia kỹ thuật vật liệu & chuyên gia SEO của DAFA Glass. Hãy viết nội dung chuyên sâu, phân tích kỹ lưỡng chuẩn SEO cho mục mang tiêu đề '{req.section_title}' trong bài viết '{post.title}'. Yêu cầu viết dài khoảng 400-600 chữ, giàu thông tin thực tế, thông số kỹ thuật, bôi đậm từ khóa quan trọng. Định dạng HTML (chỉ dùng thẻ p, ul, li, strong, table nếu có so sánh). Context bổ sung: {req.section_context}"
     
     try:
         result = AIService.generate_completion(prompt)
@@ -199,6 +199,14 @@ async def publish_post(post_id: int, db: Session = Depends(get_db)):
         post.published_at = datetime.now()
         post.published_url = result.get("url", "")
         db.commit()
+        
+        # Auto-sync sang Google Sheets
+        try:
+            from app.services.google_sheets_service import sync_published_post_to_sheets
+            sync_published_post_to_sheets(post, db)
+        except Exception as e:
+            print(f"[SHEETS HOOK] Lỗi sync bài đăng SEO: {e}")
+            
         return {
             "message": "Đăng bài thành công",
             "status": "Published",

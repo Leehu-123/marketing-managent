@@ -14,4 +14,5 @@ class SeedingAccount(Base):
     access_token = Column(String, nullable=True)
     proxy = Column(String, nullable=True)
     status = Column(String, default="active") # active, locked, checkpoint
+    note = Column(String, nullable=True) # Ghi chú / Tên gợi nhớ phân biệt tài khoản
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)

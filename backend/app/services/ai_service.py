@@ -884,27 +884,39 @@ class AIService:
         product_context = _get_product_descriptions(focus_products)
 
         if platform.lower() == "web":
-            # Gửi prompt viết bài SEO Web
+            # Gửi prompt viết bài SEO Web chuyên sâu
             prompt = f"""
-            Hãy viết một bài viết chuẩn SEO chi tiết (Long article) bằng HTML dựa trên tiêu đề kế hoạch: "{title}"
-            Sản phẩm liên quan: {focus_products}
+            Hãy viết một bài viết chuẩn SEO chuyên sâu đỉnh cao (Long-form technical article) bằng HTML dựa trên tiêu đề kế hoạch: "{title}"
+            Sản phẩm/Chủ đề liên quan: {focus_products}
             Từ khóa chủ đạo cần SEO: {keywords}
             {brand_context}
             {product_context}
 
-            Yêu cầu:
-            - Viết theo cấu trúc HTML chuẩn (dùng thẻ <h1>, <h2>, <h3>, <p>, <ul>, <li>). CHỈ trả về phần nội dung HTML bên trong thẻ <body> (không trả về <html>, <head>).
-            - TỔNG SỐ TỪ CỦA BÀI VIẾT (phần body HTML): Khoảng 1200 - 1600 từ. Đảm bảo nội dung chuyên sâu, phân tích chi tiết, đầy đủ thông tin, cấu trúc rõ ràng. Khai thác tối đa các khía cạnh của chủ đề.
-            - Nội dung chuyên sâu, văn phong phù hợp với thương hiệu.
-            - Phân bổ từ khóa tự nhiên.
-            - Ở các vị trí cần chèn ảnh minh họa, hãy chèn chính xác chuỗi sau: <!-- IMAGE_SLOT_N --> và ngay bên dưới nó chèn <!-- IMAGE_SLOT_PROMPT_N: mô tả chi tiết hình ảnh cần thiết kế cho đoạn này --> (N là số thứ tự 1, 2, 3...).
-            - Viết kèm một đoạn text ngắn làm Headline, Subheadline (Mô tả ngắn) và CTA để in đè lên ảnh đại diện bài viết. Chú ý CTA phải phù hợp với bài viết trên website (VD: Đọc chi tiết, Tìm hiểu ngay, Nhận báo giá).
-            - Xử lý Internal/External Link: Tự động gắn các External link ra các trang uy tín (như Wikipedia) cho các khái niệm thuật ngữ nếu cần. Với các sản phẩm cốt lõi hoặc từ khóa chính, hãy tạo sẵn Placeholder Internal Link theo định dạng: `<a href="[CHUYEN_TRANG_SAN_PHAM]">từ khóa</a>` để quản trị viên dễ dàng điền link sau.
+            YÊU CẦU CHẤT LƯỢNG & ĐỘ SÂU NỘI DUNG BẮT BUỘC:
+            1. ĐỘ DÀI & ĐỘ SÂU: Tối thiểu 1.800 - 2.500 từ. Viết đầy đủ, phân tích chi tiết, lập luận đa chiều, số liệu rõ ràng, tuyệt đối KHÔNG viết tóm tắt hay kết thúc vội vàng.
+            2. BỐ CỤC: Bắt buộc cấu trúc bài viết gồm ít nhất 6 - 8 phần chính (thẻ <h2>). Trong mỗi phần <h2>, bắt buộc có 2 - 3 mục con chi tiết (thẻ <h3>):
+               - <h2>1. Định nghĩa & Bản chất kỹ thuật của chủ đề</h2>: Nguồn gốc, cấu tạo vật lý/hóa học, nguyên lý hoạt động, tiêu chuẩn kỹ thuật (TCVN, ASTM).
+               - <h2>2. Bảng thông số kỹ thuật chi tiết</h2>: Bắt buộc có ít nhất 1 bảng HTML (<table>) so sánh chi tiết: độ dày (mm), cấu tạo (film dán, lớp đệm), khả năng chịu lực va đập, chỉ số cách âm (dB), khả năng cách nhiệt (U-value, SHGC), giá thành ước tính.
+               - <h2>3. Phân tích ưu điểm vượt trội & Nhược điểm cần lưu ý</h2>: Đi sâu vào an toàn khi vỡ, chống tia UV, độ bền quang học, khả năng chịu tải gió/áp lực. Nêu rõ hạn chế kỹ thuật và cách khắc phục.
+               - <h2>4. Ứng dụng thực tế theo từng công trình</h2>: Biệt thự/nhà phố, tòa nhà mặt dựng kính, văn phòng hiện đại, nội thất phòng tắm/bếp/lan can.
+               - <h2>5. Quy trình sản xuất gia công & Tiêu chuẩn thi công chuẩn xác tại DAFA Glass</h2>: Cắt mài CNC, rửa sấy vô trùng, ghép film phòng sạch, hút chân không, hấp nhiệt autoclave cao áp. Lưu ý lắp đặt phụ kiện inox 304, đệm kê và keo kết cấu chuyên dụng.
+               - <h2>6. Báo giá tham khảo & Các yếu tố ảnh hưởng chi phí</h2>: Khổ kính, gia công khoét lỗ, độ dày, vị trí vận chuyển, phụ kiện đồng bộ.
+               - <h2>7. Sai lầm phổ biến khi chọn mua & Lời khuyên kỹ sư</h2>: Hàng nhái film tái chế ố vàng, nổ vỡ do sai kỹ thuật, cách nghiệm thu công trình.
+               - <h2>8. Câu hỏi thường gặp (FAQ)</h2>: Giải đáp chuyên sâu 4 - 5 thắc mắc thực tế của khách hàng/nhà thầu.
+            3. ĐỊNH DẠNG HTML:
+               - Dùng thẻ <h1>, <h2>, <h3>, <p>, <ul>, <li>, <strong>, <table>, <thead>, <tbody>, <tr>, <th>, <td>.
+               - CHỈ trả về phần nội dung HTML bên trong thẻ <body> (KHÔNG bao gồm <!DOCTYPE>, <html>, <head>, <body>). Bắt đầu trực tiếp từ <h1>.
+            4. VỊ TRÍ ẢNH MINH HỌA:
+               - Ở 3 đến 5 vị trí thích hợp cần chèn ảnh minh họa, hãy chèn chính xác chuỗi: <!-- IMAGE_SLOT_N --> và ngay bên dưới chèn: <!-- IMAGE_SLOT_PROMPT_N: mô tả chi tiết hình ảnh cần thiết kế cho đoạn này --> (N là số thứ tự 1, 2, 3, 4...).
+            5. TIÊU ĐỀ ẢNH & CTA:
+               - Viết kèm Headline, Subheadline (Mô tả ngắn) và CTA để in đè lên ảnh đại diện bài viết (VD: Khám phá ngay, Nhận báo giá, Tư vấn kỹ thuật).
+            6. INTERNAL / EXTERNAL LINK:
+               - Tạo sẵn Placeholder link nội bộ: `<a href="[CHUYEN_TRANG_SAN_PHAM]">từ khóa</a>` cho các sản phẩm/từ khóa chính.
 
             Hãy trả về một định dạng JSON duy nhất, KHÔNG chứa markdown block:
             {{
               "title": "{title}",
-              "body": "Nội dung HTML ở đây...",
+              "body": "Nội dung HTML đầy đủ ở đây...",
               "meta_title": "Meta Title chuẩn SEO ở đây",
               "meta_description": "Meta Description chuẩn SEO ở đây",
               "headings_structure": "{{\\"H1\\": \\"{title}\\", \\"H2\\": [\\"Ý 1\\", \\"Ý 2\\"]}}",
@@ -947,32 +959,203 @@ class AIService:
             if provider_info["provider"] in ["OpenAI", "9Router"]:
                 client = provider_info["client"]
                 model_name = provider_info.get("model") or settings.OPENAI_MODEL
+                system_prompt = (
+                    "You are an expert civil & building materials engineer and senior SEO content specialist for DAFA Glass. "
+                    "You write highly in-depth, authoritative, comprehensive, and well-structured long-form articles in HTML format. "
+                    "Always return valid JSON without markdown wrapping."
+                ) if platform.lower() == "web" else "You are a helpful assistant that outputs only valid JSON objects without markdown block syntax."
+                
+                max_tokens = 6000 if platform.lower() == "web" else 1500
+
                 response = client.chat.completions.create(
                     model=model_name,
                     messages=[
-                        {"role": "system", "content": "You are a helpful assistant that outputs only valid JSON objects without markdown block syntax."},
+                        {"role": "system", "content": system_prompt},
                         {"role": "user", "content": prompt}
                     ],
-                    temperature=0.7
+                    temperature=0.7,
+                    max_tokens=max_tokens
                 )
                 content = response.choices[0].message.content.strip()
             elif provider_info["provider"] == "Gemini":
                 client = provider_info["client"]
                 import google.generativeai as genai
-                full_prompt = "You are a helpful assistant that outputs only valid JSON objects without markdown block syntax.\n\n" + prompt
+                full_prompt = (
+                    "You are an expert civil & building materials engineer and senior SEO content specialist for DAFA Glass. "
+                    "You write highly in-depth, authoritative, comprehensive, and well-structured long-form articles in HTML format. "
+                    "Always return valid JSON without markdown wrapping.\n\n"
+                ) + prompt
                 response = client.generate_content(full_prompt)
                 content = response.text.strip()
                 
-            if content.startswith("```"):
-                content = content.split("```")[1]
-                if content.startswith("json"):
-                    content = content[4:]
-            content = content.strip()
-            return json.loads(content)
+            # Robust parsing of AI JSON response
+            import re
+            content_clean = content.strip()
+            if content_clean.startswith("```"):
+                lines = content_clean.split("\n")
+                if lines[0].startswith("```"):
+                    lines = lines[1:]
+                if lines and lines[-1].strip().startswith("```"):
+                    lines = lines[:-1]
+                content_clean = "\n".join(lines).strip()
+                
+            res_data = None
+            # 1. Try standard json.loads
+            try:
+                res_data = json.loads(content_clean)
+            except Exception:
+                pass
+
+            # 2. Try json.loads with strict=False
+            if not res_data:
+                try:
+                    res_data = json.loads(content_clean, strict=False)
+                except Exception:
+                    pass
+
+            # 3. Clean trailing commas
+            if not res_data:
+                try:
+                    cleaned_commas = re.sub(r',\s*([}\]])', r'\1', content_clean)
+                    res_data = json.loads(cleaned_commas, strict=False)
+                except Exception:
+                    pass
+
+            # 4. Fallback regex extraction
+            if not res_data:
+                res_data = {}
+                for key in ["title", "meta_title", "meta_description", "image_prompt", "headline", "subheadline", "cta", "utm_source"]:
+                    m = re.search(r'"' + key + r'"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"', content_clean)
+                    if m:
+                        try:
+                            res_data[key] = m.group(1).encode().decode('unicode-escape', errors='ignore')
+                        except:
+                            res_data[key] = m.group(1)
+
+                body_m = re.search(r'"body"\s*:\s*"(.*?)"\s*,\s*"(?:meta_title|meta_description|headings_structure|image_prompt)', content_clean, re.DOTALL)
+                if body_m:
+                    res_data["body"] = body_m.group(1).replace('\\"', '"').replace('\\n', '\n')
+                else:
+                    body_m2 = re.search(r'"body"\s*:\s*"(.*)"\s*}', content_clean, re.DOTALL)
+                    if body_m2:
+                        res_data["body"] = body_m2.group(1).replace('\\"', '"').replace('\\n', '\n')
+
+            if not res_data or not res_data.get("body"):
+                raise ValueError("Could not extract body from AI response")
+
+            # Post-process body to clean any accidental wrapper tags
+            body = res_data["body"]
+            body = re.sub(r'<!DOCTYPE[^>]*>', '', body, flags=re.IGNORECASE)
+            body = re.sub(r'<html[^>]*>', '', body, flags=re.IGNORECASE)
+            body = re.sub(r'</html>', '', body, flags=re.IGNORECASE)
+            body = re.sub(r'<head>.*?</head>', '', body, flags=re.IGNORECASE | re.DOTALL)
+            body = re.sub(r'<body[^>]*>', '', body, flags=re.IGNORECASE)
+            body = re.sub(r'</body>', '', body, flags=re.IGNORECASE)
+            res_data["body"] = body.strip()
+
+            if not res_data.get("title"):
+                res_data["title"] = title
+
+            # Auto extract headings_structure from body if missing or normalize to string
+            if not res_data.get("headings_structure"):
+                h1_m = re.search(r'<h1[^>]*>(.*?)</h1>', body, re.IGNORECASE)
+                h2_ms = re.findall(r'<h2[^>]*>(.*?)</h2>', body, re.IGNORECASE)
+                h1_val = h1_m.group(1).strip() if h1_m else title
+                h2_vals = [re.sub(r'<[^>]+>', '', h2).strip() for h2 in h2_ms]
+                res_data["headings_structure"] = json.dumps({"H1": h1_val, "H2": h2_vals}, ensure_ascii=False)
+            elif isinstance(res_data["headings_structure"], dict):
+                res_data["headings_structure"] = json.dumps(res_data["headings_structure"], ensure_ascii=False)
+
+            if not res_data.get("headline"):
+                res_data["headline"] = title[:30]
+            if not res_data.get("cta"):
+                res_data["cta"] = "Nhận báo giá"
+            if not res_data.get("subheadline"):
+                res_data["subheadline"] = "Kính kiến trúc cao cấp DAFA Glass"
+                
+            return res_data
         except Exception as e:
-            print(f"[AI ERROR] Lỗi khi gọi OpenAI API để viết bài: {e}. Sử dụng Mock.")
+            print(f"[AI ERROR] Lỗi khi gọi AI API để viết bài: {e}. Sử dụng Mock.")
             return AIService._mock_post_content(title, platform, format_type, focus_products, keywords)
 
+    @staticmethod
+    def translate_post(title: str, body: str, meta_title: str, meta_description: str, target_lang: str) -> Dict[str, str]:
+        """
+        Dịch nội dung bài viết sang ngôn ngữ đích (en, zh) trong khi giữ nguyên định dạng HTML.
+        """
+        provider_info = get_active_ai_client()
+        if not provider_info or settings.MOCK_AI:
+            print("[AI ERROR] AI không khả dụng hoặc MOCK mode được bật. Trả về bản dịch mẫu.")
+            return {
+                "title": f"[{target_lang}] {title}",
+                "body": f"[{target_lang}] {body}",
+                "meta_title": f"[{target_lang}] {meta_title}",
+                "meta_description": f"[{target_lang}] {meta_description}"
+            }
+            
+        lang_name = "Tiếng Anh" if target_lang == "en" else "Tiếng Trung (Giản thể)"
+        
+        prompt = f"""
+        Bạn là một chuyên gia dịch thuật và SEO.
+        Nhiệm vụ của bạn là DỊCH TOÀN BỘ nội dung bài viết dưới đây sang {lang_name}.
+        
+        QUY TẮC BẮT BUỘC (CRITICAL RULES):
+        1. TUYỆT ĐỐI GIỮ NGUYÊN cấu trúc các thẻ HTML (như <h1>, <h2>, <p>, <ul>, <!-- IMAGE_SLOT_1 -->, v.v...).
+        2. CHỈ DỊCH nội dung văn bản bên trong các thẻ HTML.
+        3. Tất cả văn bản kết quả trả về PHẢI 100% BẰNG {lang_name}. TUYỆT ĐỐI KHÔNG ĐƯỢC để sót lại bất kỳ câu tiếng Việt nào.
+        4. KHÔNG thêm các tiền tố như [EN], [ZH] vào tiêu đề. Chỉ trả về văn bản đã dịch.
+        
+        Nội dung gốc (Tiếng Việt):
+        - Tiêu đề (Title): {title}
+        - Meta Title: {meta_title}
+        - Meta Description: {meta_description}
+        - Nội dung HTML (Body):
+        {body}
+        
+        Hãy trả về kết quả dưới dạng JSON (KHÔNG chứa markdown block ```json):
+        {{
+            "title": "[Tiêu đề đã dịch sang {lang_name}]",
+            "meta_title": "[Meta title đã dịch sang {lang_name}]",
+            "meta_description": "[Meta description đã dịch sang {lang_name}]",
+            "body": "[Nội dung HTML đã dịch sang {lang_name}, giữ nguyên thẻ HTML]"
+        }}
+        """
+        try:
+            content = ""
+            if provider_info["provider"] in ["OpenAI", "9Router"]:
+                client = provider_info["client"]
+                model_name = provider_info.get("model") or settings.OPENAI_MODEL
+                response = client.chat.completions.create(
+                    model=model_name,
+                    messages=[
+                        {"role": "system", "content": "You are a helpful translation assistant that outputs only valid JSON objects without markdown block syntax."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    temperature=0.3
+                )
+                content = response.choices[0].message.content.strip()
+            elif provider_info["provider"] == "Gemini":
+                client = provider_info["client"]
+                import google.generativeai as genai
+                full_prompt = "You are a helpful translation assistant that outputs only valid JSON objects without markdown block syntax.\n\n" + prompt
+                response = client.generate_content(
+                    full_prompt,
+                    generation_config=genai.types.GenerationConfig(max_output_tokens=8192)
+                )
+                content = response.text.strip()
+                
+            # Dùng regex để tìm chuỗi JSON bắt đầu bằng { và kết thúc bằng }
+            import re
+            json_match = re.search(r'\{[\s\S]*\}', content)
+            if json_match:
+                content = json_match.group(0)
+            else:
+                raise ValueError("Không tìm thấy dữ liệu JSON trong phản hồi của AI.")
+                
+            return json.loads(content)
+        except Exception as e:
+            print(f"[AI ERROR] Lỗi khi dịch bài: {e}\nRaw Content:\n{content if 'content' in locals() else 'None'}")
+            raise
 
     @staticmethod
     def generate_insights(campaign_name: str, month_year: str, focus_products: str, metrics_summary: str) -> str:
@@ -1029,8 +1212,6 @@ class AIService:
         except Exception as e:
             print(f"[AI ERROR] Lỗi khi phân tích số liệu: {e}")
             return f"### 📊 BÁO CÁO PHÂN TÍCH HIỆU QUẢ - THÁNG {month_year}\n\nHiện tại hệ thống AI đang quá tải và không thể phân tích số liệu tự động. Lỗi: {e}"
-
-
 
 def generate_seeding_content(target_content: str, instructions: str, platform: str, task_type: str = "COMMENT") -> str:
     """Generate content for seeding tasks based on target post content and user instructions."""
@@ -1107,3 +1288,7 @@ Chỉ trả về nội dung cần đăng/comment, KHÔNG thêm lời giải thí
 
     return "Tuyệt vời!"
 
+    @staticmethod
+    def ensure_post_translations_exist(db_post, db) -> None:
+        """Website dafaglass.com chỉ dùng Tiếng Việt đơn ngữ."""
+        pass

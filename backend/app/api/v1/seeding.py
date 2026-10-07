@@ -1,7 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
 from typing import List, Any
-from datetime import datetime
 from app.core.database import get_db
 from app.api.deps import get_current_user
 from app.models.seeding_account import SeedingAccount
@@ -193,61 +192,56 @@ def get_seeding_campaigns(
     skip: int = 0,
     limit: int = 100
 ):
-    campaigns = db.query(SeedingCampaign).offset(skip).limit(limit).all()
-    today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    campaigns = db.query(SeedingCampaign).order_by(SeedingCampaign.id.desc()).offset(skip).limit(limit).all()
     
-    result = []
-    for camp in campaigns:
-        tasks = db.query(SeedingTask).filter(SeedingTask.campaign_id == camp.id).all()
-        today_tasks = [t for t in tasks if t.created_at and t.created_at >= today_start]
+    results = []
+    for c in campaigns:
+        tasks = db.query(SeedingTask).filter(SeedingTask.campaign_id == c.id).all()
+        total = len(tasks)
+        success = sum(1 for t in tasks if t.status == 'success')
+        failed = sum(1 for t in tasks if t.status == 'failed')
+        in_progress = sum(1 for t in tasks if t.status == 'in_progress')
+        pending = sum(1 for t in tasks if t.status == 'pending')
+        pct = round(((success + failed) / total * 100)) if total > 0 else 0
         
-        today_total = len(today_tasks)
-        today_success = sum(1 for t in today_tasks if t.status == "success")
-        today_failed = sum(1 for t in today_tasks if t.status == "failed")
-        today_pending = sum(1 for t in today_tasks if t.status in ["pending", "running"])
-        
-        total_tasks = len(tasks)
-        total_success = sum(1 for t in tasks if t.status == "success")
-        total_failed = sum(1 for t in tasks if t.status == "failed")
-        total_pending = sum(1 for t in tasks if t.status in ["pending", "running"])
-        
-        last_executed = None
-        executed_tasks = [t for t in tasks if t.executed_at]
-        if executed_tasks:
-            last_executed = max(t.executed_at for t in executed_tasks)
-        elif tasks:
-            last_executed = max(t.created_at for t in tasks)
-            
-        today_label = ""
-        if camp.is_daily_repeat:
-            if today_total == 0:
-                today_label = f"Chưa chạy hôm nay (Hẹn {camp.daily_schedule_time or '--:--'})"
-            elif today_pending > 0:
-                today_label = f"Đang chạy ({today_success}/{today_total} nhóm)"
-            elif today_failed > 0:
-                today_label = f"Đã chạy ({today_success}/{today_total} xong, {today_failed} lỗi)"
-            else:
-                today_label = f"Đã chạy hôm nay ({today_success}/{today_total} nhóm xong)"
+        # Tính toán tiến trình cho lần chạy hiện tại (đặc biệt hữu ích cho chiến dịch lặp hàng ngày)
+        if c.is_daily_repeat and tasks:
+            latest_date = max(t.created_at.date() for t in tasks)
+            run_tasks = [t for t in tasks if t.created_at.date() == latest_date]
+            cr_total = len(run_tasks)
+            cr_success = sum(1 for t in run_tasks if t.status == 'success')
+            cr_failed = sum(1 for t in run_tasks if t.status == 'failed')
+            cr_in_progress = sum(1 for t in run_tasks if t.status == 'in_progress')
+            cr_pending = sum(1 for t in run_tasks if t.status == 'pending')
+            cr_pct = round(((cr_success + cr_failed) / cr_total * 100)) if cr_total > 0 else 0
+            cr_date = latest_date.strftime("%d/%m/%Y")
         else:
-            if camp.status == "completed":
-                today_label = f"Đã hoàn tất ({total_success}/{total_tasks} bài)"
-            elif camp.status == "running":
-                today_label = f"Đang chạy ({total_success}/{total_tasks} bài)"
-            elif camp.status == "failed":
-                today_label = f"Lỗi ({total_failed}/{total_tasks} bài lỗi)"
-            else:
-                today_label = f"Chờ chạy ({total_tasks} bài)"
-                
-        camp_resp = SeedingCampaignResponse.model_validate(camp)
-        camp_resp.today_total = today_total
-        camp_resp.today_success = today_success
-        camp_resp.today_failed = today_failed
-        camp_resp.today_pending = today_pending
-        camp_resp.today_status_label = today_label
-        camp_resp.last_run_at = last_executed
-        result.append(camp_resp)
+            cr_total = total
+            cr_success = success
+            cr_failed = failed
+            cr_in_progress = in_progress
+            cr_pending = pending
+            cr_pct = pct
+            cr_date = None
         
-    return result
+        c_dict = {col.name: getattr(c, col.name) for col in c.__table__.columns}
+        c_dict.update({
+            "total_tasks": total,
+            "completed_tasks": success,
+            "failed_tasks": failed,
+            "in_progress_tasks": in_progress,
+            "pending_tasks": pending,
+            "progress_percent": pct,
+            "current_run_total": cr_total,
+            "current_run_completed": cr_success,
+            "current_run_failed": cr_failed,
+            "current_run_in_progress": cr_in_progress,
+            "current_run_pending": cr_pending,
+            "current_run_percent": cr_pct,
+            "current_run_date": cr_date
+        })
+        results.append(SeedingCampaignResponse(**c_dict))
+    return results
 
 @router.get("/campaigns/{campaign_id}/tasks", response_model=List[SeedingTaskResponse])
 def get_campaign_tasks(
@@ -259,58 +253,8 @@ def get_campaign_tasks(
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaign not found")
         
-    tasks = db.query(SeedingTask).filter(SeedingTask.campaign_id == campaign_id).order_by(SeedingTask.id.desc()).all()
+    tasks = db.query(SeedingTask).filter(SeedingTask.campaign_id == campaign_id).all()
     return tasks
-
-@router.post("/campaigns/{campaign_id}/trigger-daily")
-def trigger_daily_campaign(
-    campaign_id: int,
-    db: Session = Depends(get_db),
-    current_user = Depends(get_current_user)
-):
-    campaign = db.query(SeedingCampaign).filter(SeedingCampaign.id == campaign_id).first()
-    if not campaign:
-        raise HTTPException(status_code=404, detail="Campaign not found")
-        
-    urls = []
-    if campaign.target_urls:
-        try:
-            urls = json.loads(campaign.target_urls)
-        except Exception:
-            urls = []
-            
-    acc_ids = []
-    if campaign.account_ids:
-        try:
-            acc_ids = json.loads(campaign.account_ids)
-        except Exception:
-            acc_ids = []
-            
-    for url in urls:
-        if acc_ids:
-            for acc_id in acc_ids:
-                task = SeedingTask(
-                    campaign_id=campaign.id,
-                    account_id=acc_id,
-                    target_url=url,
-                    task_type=campaign.campaign_type,
-                    media_urls=campaign.media_urls,
-                    status="pending"
-                )
-                db.add(task)
-        else:
-            task = SeedingTask(
-                campaign_id=campaign.id,
-                target_url=url,
-                task_type=campaign.campaign_type,
-                media_urls=campaign.media_urls,
-                status="pending"
-            )
-            db.add(task)
-            
-    campaign.status = "pending"
-    db.commit()
-    return {"status": "success", "message": f"Đã kích hoạt đợt chạy mới cho chiến dịch '{campaign.name}'!"}
 
 from app.schemas.seeding import SeedingCampaignUpdate
 
@@ -326,16 +270,21 @@ def update_seeding_campaign(
         raise HTTPException(status_code=404, detail="Campaign not found")
         
     update_data = campaign_in.model_dump(exclude_unset=True)
+    should_rerun = update_data.pop("rerun", False)
+    
     for field, value in update_data.items():
         setattr(campaign, field, value)
         
-    # Re-generate tasks if target_urls changed or campaign was failed/completed
-    if ("target_urls" in update_data or "account_ids" in update_data) or campaign.status in ["failed", "completed"]:
-        # Xoá toàn bộ task cũ để chạy lại từ đầu
-        db.query(SeedingTask).filter(SeedingTask.campaign_id == campaign.id).delete()
+    # Re-generate tasks if rerun requested or content/targets changed or campaign completed/failed
+    content_changed = any(k in update_data for k in ["target_urls", "account_ids", "post_content", "media_urls"])
+    if should_rerun or content_changed or campaign.status in ["failed", "completed"]:
+        # Xoá toàn bộ task cũ để chạy lại từ đầu với nội dung/tài khoản/media mới
+        deleted = db.query(SeedingTask).filter(SeedingTask.campaign_id == campaign.id).delete(synchronize_session=False)
+        db.flush()
+        print(f"[SEEDING] Deleted {deleted} old tasks for campaign #{campaign.id}")
         campaign.status = "pending"
         try:
-            urls = json.loads(campaign.target_urls)
+            urls = json.loads(campaign.target_urls) if campaign.target_urls else []
             acc_ids = json.loads(campaign.account_ids) if campaign.account_ids else []
             if not isinstance(acc_ids, list):
                 acc_ids = []
@@ -361,12 +310,128 @@ def update_seeding_campaign(
                         media_urls=campaign.media_urls
                     )
                     db.add(task)
-        except Exception:
+        except Exception as exc:
+            print(f"[SEEDING] Lỗi tái tạo tasks khi update: {exc}")
             pass
             
     db.commit()
     db.refresh(campaign)
-    return campaign
+
+    tasks = db.query(SeedingTask).filter(SeedingTask.campaign_id == campaign.id).all()
+    total = len(tasks)
+    success = sum(1 for t in tasks if t.status == 'success')
+    failed = sum(1 for t in tasks if t.status == 'failed')
+    in_progress = sum(1 for t in tasks if t.status == 'in_progress')
+    pending = sum(1 for t in tasks if t.status == 'pending')
+    pct = round(((success + failed) / total * 100)) if total > 0 else 0
+
+    c_dict = {col.name: getattr(campaign, col.name) for col in campaign.__table__.columns}
+    c_dict.update({
+        "total_tasks": total,
+        "completed_tasks": success,
+        "failed_tasks": failed,
+        "in_progress_tasks": in_progress,
+        "pending_tasks": pending,
+        "progress_percent": pct,
+        "current_run_total": total,
+        "current_run_completed": success,
+        "current_run_failed": failed,
+        "current_run_in_progress": in_progress,
+        "current_run_pending": pending,
+        "current_run_percent": pct,
+        "current_run_date": None
+    })
+    return SeedingCampaignResponse(**c_dict)
+
+@router.post("/campaigns/{campaign_id}/rerun")
+def rerun_seeding_campaign(
+    campaign_id: int,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """Tái tạo toàn bộ task và đặt chiến dịch về pending để chạy lại từ đầu."""
+    campaign = db.query(SeedingCampaign).filter(SeedingCampaign.id == campaign_id).first()
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+        
+    db.query(SeedingTask).filter(SeedingTask.campaign_id == campaign.id).delete(synchronize_session=False)
+    db.flush()
+    
+    created_count = 0
+    try:
+        urls = json.loads(campaign.target_urls) if campaign.target_urls else []
+        acc_ids = json.loads(campaign.account_ids) if campaign.account_ids else []
+        if not isinstance(acc_ids, list):
+            acc_ids = []
+
+        for url in urls:
+            if acc_ids:
+                for acc_id in acc_ids:
+                    task = SeedingTask(
+                        campaign_id=campaign.id,
+                        account_id=acc_id,
+                        target_url=url,
+                        status="pending",
+                        task_type=campaign.campaign_type,
+                        media_urls=campaign.media_urls
+                    )
+                    db.add(task)
+                    created_count += 1
+            else:
+                task = SeedingTask(
+                    campaign_id=campaign.id,
+                    target_url=url,
+                    status="pending",
+                    task_type=campaign.campaign_type,
+                    media_urls=campaign.media_urls
+                )
+                db.add(task)
+                created_count += 1
+    except Exception as e:
+        print(f"[SEEDING] Lỗi tái tạo task khi rerun: {e}")
+        
+    campaign.status = "pending"
+    db.commit()
+    
+    return {
+        "status": "success",
+        "message": f"Đã khởi tạo lại {created_count} task cho chiến dịch '{campaign.name}', sẵn sàng chạy!",
+        "created_count": created_count
+    }
+
+from typing import Optional, List
+from pydantic import BaseModel
+
+class ToggleDailyRequest(BaseModel):
+    is_daily_repeat: Optional[bool] = None
+
+@router.post("/campaigns/{campaign_id}/toggle-daily")
+def toggle_daily_schedule(
+    campaign_id: int,
+    payload: Optional[ToggleDailyRequest] = None,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """Bật hoặc dừng lịch chạy tự động hàng ngày của chiến dịch."""
+    campaign = db.query(SeedingCampaign).filter(SeedingCampaign.id == campaign_id).first()
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+        
+    if payload and payload.is_daily_repeat is not None:
+        campaign.is_daily_repeat = payload.is_daily_repeat
+    else:
+        campaign.is_daily_repeat = not bool(campaign.is_daily_repeat)
+        
+    db.commit()
+    db.refresh(campaign)
+    
+    status_str = "đang BẬT lặp lại hàng ngày" if campaign.is_daily_repeat else "đã TẠM DỪNG lặp lại hàng ngày"
+    return {
+        "status": "success",
+        "is_daily_repeat": campaign.is_daily_repeat,
+        "daily_schedule_time": campaign.daily_schedule_time,
+        "message": f"Chiến dịch '{campaign.name}' {status_str}."
+    }
 
 @router.delete("/campaigns/{campaign_id}")
 def delete_seeding_campaign(
@@ -566,8 +631,12 @@ def update_task_result(
         task.account_id = result_in.account_id
     if result_in.generated_content:
         task.generated_content = result_in.generated_content
+    
+    # Ghi timestamp thực thi
+    from datetime import datetime
+    if result_in.status in ["success", "failed"]:
+        task.executed_at = datetime.utcnow()
         
-    task.executed_at = datetime.utcnow()
     db.commit()
     db.refresh(task)
     
@@ -594,7 +663,58 @@ def update_task_result(
                 campaign.status = "completed"
             db.commit()
 
+    # --- Auto-sync sang Google Sheets khi thành công ---
+    if task.status == "success":
+        try:
+            from app.services.google_sheets_service import sync_seeding_task_to_sheets
+            sync_seeding_task_to_sheets(task, db)
+        except Exception as e:
+            print(f"[SHEETS] Lỗi auto-sync Google Sheets: {e}")
+
     return {"status": "success"}
+
+@router.post("/campaigns/{campaign_id}/export-sheets")
+def export_campaign_to_sheets(
+    campaign_id: int,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """Xuất toàn bộ kết quả chiến dịch sang Google Sheets."""
+    from app.services.google_sheets_service import get_google_sheets_service
+    
+    campaign = db.query(SeedingCampaign).filter(SeedingCampaign.id == campaign_id).first()
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Không tìm thấy chiến dịch")
+    
+    sheets_svc = get_google_sheets_service(db)
+    if not sheets_svc:
+        raise HTTPException(status_code=400, detail="Chưa cấu hình Google Sheets. Vào Cài đặt → Google Sheets để thiết lập.")
+    
+    try:
+        result = sheets_svc.export_campaign(campaign_id, db)
+        # Also update summary
+        sheets_svc.update_summary_sheet(db)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Lỗi xuất Google Sheets: {str(e)}")
+
+@router.post("/export-sheets/summary")
+def update_sheets_summary(
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """Cập nhật tab Tổng hợp trên Google Sheets."""
+    from app.services.google_sheets_service import get_google_sheets_service
+    
+    sheets_svc = get_google_sheets_service(db)
+    if not sheets_svc:
+        raise HTTPException(status_code=400, detail="Chưa cấu hình Google Sheets")
+    
+    try:
+        sheets_svc.update_summary_sheet(db)
+        return {"status": "success", "message": "Đã cập nhật bảng Tổng hợp", "spreadsheet_url": f"https://docs.google.com/spreadsheets/d/{sheets_svc.spreadsheet_id}"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Lỗi: {str(e)}")
 
 # --- Tool Control Endpoints ---
 from pydantic import BaseModel
@@ -602,12 +722,18 @@ class ToolStartRequest(BaseModel):
     platform: str = "facebook"
     show_browser: bool = False
 
-
-def _find_tool_paths():
-    """Tìm đường dẫn Python executable và main.py cho client automation tool."""
+@router.post("/tool/start")
+def start_tool(req: ToolStartRequest, request: Request):
+    global client_tool_process
+    
+    if client_tool_process is not None:
+        if client_tool_process.poll() is None:
+            return {"status": "running", "message": "Tool đang chạy rồi!"}
+            
     current_dir = os.path.dirname(os.path.abspath(__file__))
     project_root = os.path.abspath(os.path.join(current_dir, "../../../"))
     
+    # Tìm client_automation theo các đường dẫn khả thi
     client_dir_candidates = [
         os.path.join(project_root, "client_automation"),
         "/app/client_automation",
@@ -620,11 +746,13 @@ def _find_tool_paths():
         if os.path.exists(cd):
             client_dir = cd
             break
+            
     if not client_dir:
         client_dir = os.path.join(project_root, "client_automation")
-    
+        
     main_script = os.path.join(client_dir, "main.py")
     
+    # Danh sách ứng viên Python executable
     python_candidates = [
         os.path.join(client_dir, "venv", "Scripts", "python.exe"),
         os.path.join(client_dir, "venv", "bin", "python"),
@@ -640,61 +768,56 @@ def _find_tool_paths():
         if cand and os.path.exists(cand):
             python_exe = cand
             break
-    
-    return client_dir, main_script, python_exe
-
-
-def start_tool_internal(platform: str = "facebook", show_browser: bool = False):
-    """
-    Internal function to start the client automation tool.
-    Used by both the API endpoint and the scheduler auto-restart.
-    Returns (success: bool, message: str).
-    """
-    global client_tool_process
-    
-    if client_tool_process is not None:
-        if client_tool_process.poll() is None:
-            return True, "Tool đang chạy rồi!"
-    
-    client_dir, main_script, python_exe = _find_tool_paths()
-    
+            
     if not python_exe or not os.path.exists(main_script):
-        return False, f"Chưa tìm thấy môi trường Python phù hợp cho Client Tool tại: {client_dir}"
-    
-    cmd = [python_exe, main_script, "--platform", platform]
-    if show_browser:
+        return {"status": "error", "message": f"Chưa tìm thấy môi trường Python phù hợp cho Client Tool tại: {client_dir}"}
+        
+    # Ưu tiên localhost khi chạy trong container
+    backend_url = "http://127.0.0.1:8000"
+    cmd = [python_exe, main_script, "--platform", req.platform, "--backend-url", backend_url]
+    if req.show_browser:
         cmd.append("--show-browser")
-    
+        
     try:
+        # Popen without waiting
         env = os.environ.copy()
         env["PYTHONIOENCODING"] = "utf-8"
-        creationflags = subprocess.CREATE_NEW_CONSOLE if (sys.platform == "win32" and show_browser) else 0
+        creationflags = subprocess.CREATE_NEW_CONSOLE if (sys.platform == "win32" and req.show_browser) else 0
+        
+        log_path = os.path.join(client_dir, "tool_log.txt")
+        log_file = open(log_path, "a", encoding="utf-8")  # append mode để giữ log cũ
+        
+        # start_new_session=True tạo process group mới để có thể kill toàn bộ tree
         client_tool_process = subprocess.Popen(
             cmd,
             cwd=client_dir,
             env=env,
-            creationflags=creationflags
+            creationflags=creationflags,
+            stdout=log_file,
+            stderr=subprocess.STDOUT,
+            start_new_session=(sys.platform != "win32")
         )
-        # Track start time for crash info
-        from app.worker.scheduler import tool_crash_info
-        tool_crash_info["tool_started_at"] = datetime.utcnow().isoformat()
-        return True, "Đã khởi động Tool Automation!"
+        return {"status": "success", "message": "Đã khởi động Tool Automation!"}
     except Exception as e:
-        return False, str(e)
-
-
-@router.post("/tool/start")
-def start_tool(req: ToolStartRequest):
-    success, message = start_tool_internal(platform=req.platform, show_browser=req.show_browser)
-    if success:
-        return {"status": "success", "message": message}
-    return {"status": "error", "message": message}
+        return {"status": "error", "message": str(e)}
 
 @router.post("/tool/stop")
 def stop_tool():
     global client_tool_process
     if client_tool_process and client_tool_process.poll() is None:
-        client_tool_process.terminate()
+        pid = client_tool_process.pid
+        try:
+            # Kill entire process tree (browser + playwright + python)
+            import signal
+            if sys.platform == "win32":
+                subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)], capture_output=True)
+            else:
+                os.killpg(os.getpgid(pid), signal.SIGTERM)
+        except Exception:
+            try:
+                client_tool_process.kill()
+            except Exception:
+                pass
         client_tool_process = None
         return {"status": "success", "message": "Đã dừng Tool."}
     return {"status": "idle", "message": "Tool không chạy."}
@@ -702,72 +825,58 @@ def stop_tool():
 @router.get("/tool/status")
 def get_tool_status():
     global client_tool_process
-    from app.worker.scheduler import tool_crash_info
-    
-    is_running = client_tool_process is not None and client_tool_process.poll() is None
-    
-    result = {
-        "status": "running" if is_running else "idle",
-        "last_crash_at": tool_crash_info.get("last_crash_at"),
-        "auto_restart_count": tool_crash_info.get("auto_restart_count", 0),
-        "tool_started_at": tool_crash_info.get("tool_started_at"),
-    }
-    
-    # Check for stale tasks as a health indicator
-    if is_running:
-        from app.core.database import SessionLocal
-        db = SessionLocal()
-        try:
-            stale_count = db.query(SeedingTask).filter(
-                SeedingTask.status == "in_progress"
-            ).count()
-            result["stale_tasks_count"] = stale_count
-        except Exception:
-            result["stale_tasks_count"] = 0
-        finally:
-            db.close()
-    
-    return result
+    if client_tool_process and client_tool_process.poll() is None:
+        return {"status": "running"}
+    return {"status": "idle"}
 
+@router.get("/tool/logs")
+def get_tool_logs(
+    limit: int = 80,
+    current_user = Depends(get_current_user)
+):
+    """Lấy các dòng log mới nhất của Tool Seeding Automation để theo dõi tiến trình trực tiếp."""
+    candidates = [
+        "/var/www/marketing-management/client_automation/tool_log.txt",
+        "/app/client_automation/tool_log.txt",
+        os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../../client_automation/tool_log.txt"))
+    ]
+    log_file = None
+    for c in candidates:
+        if os.path.exists(c):
+            log_file = c
+            break
+            
+    if not log_file:
+        return {"status": "success", "logs": ["Chưa có dữ liệu nhật ký hoạt động. Vui lòng bấm 'Khởi động Tool' để bắt đầu."]}
+        
+    try:
+        with open(log_file, "r", encoding="utf-8", errors="replace") as f:
+            lines = f.readlines()
+            return {"status": "success", "logs": lines[-limit:]}
+    except Exception as e:
+        return {"status": "error", "logs": [f"Lỗi khi đọc file nhật ký: {str(e)}"]}
 
-@router.post("/campaigns/{campaign_id}/recover")
-def recover_campaign(
+@router.post("/campaigns/{campaign_id}/run-now")
+def run_campaign_now(
     campaign_id: int,
     db: Session = Depends(get_db),
     current_user = Depends(get_current_user)
 ):
-    """Reset tất cả tasks in_progress về pending cho campaign cụ thể."""
+    """Reset các task failed/pending và kích hoạt tool chạy ngay."""
     campaign = db.query(SeedingCampaign).filter(SeedingCampaign.id == campaign_id).first()
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaign not found")
     
-    stale_tasks = db.query(SeedingTask).filter(
+    # Reset task failed về pending
+    reset_count = db.query(SeedingTask).filter(
         SeedingTask.campaign_id == campaign_id,
-        SeedingTask.status == "in_progress"
-    ).all()
+        SeedingTask.status.in_(["failed", "in_progress"])
+    ).update({"status": "pending"}, synchronize_session=False)
     
-    if not stale_tasks:
-        return {"status": "ok", "message": "Không có task nào bị kẹt.", "recovered": 0}
-    
-    recovered = 0
-    for task in stale_tasks:
-        task.status = "pending"
-        task.retry_count = (task.retry_count or 0) + 1
-        task.error_message = None
-        recovered += 1
-    
-    # Đảm bảo campaign ở trạng thái pending/running để tool pick up
-    if campaign.status not in ["pending", "running"]:
-        campaign.status = "pending"
-    
+    campaign.status = "pending"
     db.commit()
     
-    return {
-        "status": "success",
-        "message": f"Đã reset {recovered} task bị kẹt về trạng thái chờ.",
-        "recovered": recovered
-    }
-
+    return {"status": "success", "message": f"Đã reset {reset_count} tasks, chiến dịch sẵn sàng chạy.", "reset_count": reset_count}
 
 # --- AI Integration ---
 
@@ -811,6 +920,12 @@ def fetch_tasks_for_client(
         SeedingTask.status == "pending"
     ).limit(limit).all()
     
+    # Khóa task sang in_progress để tránh cấp trùng
+    for task in tasks:
+        task.status = "in_progress"
+    if tasks:
+        db.commit()
+    
     results = []
     for task in tasks:
         camp = campaign_map.get(task.campaign_id)
@@ -823,10 +938,13 @@ def fetch_tasks_for_client(
         
         # Nếu task chưa có account_id, lấy random 1 account active cùng platform
         if not acc:
-            acc = db.query(SeedingAccount).filter(
+            import random as rand_mod
+            active_accounts = db.query(SeedingAccount).filter(
                 SeedingAccount.platform == platform,
                 SeedingAccount.status == "active"
-            ).order_by(SeedingAccount.id).first()
+            ).all()
+            if active_accounts:
+                acc = rand_mod.choice(active_accounts)
             
         # Look up parent comment content if this is a reply task
         parent_comment = None

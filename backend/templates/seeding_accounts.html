@@ -13,7 +13,8 @@
         password: '',
         two_fa_secret: '',
         cookies: '',
-        proxy: ''
+        proxy: '',
+        note: ''
     },
     
     editingId: null,
@@ -27,7 +28,12 @@
         try {
             const res = await fetch('/api/v1/seeding/accounts');
             if (res.ok) {
-                this.accounts = await res.json();
+                const data = await res.json();
+                this.accounts = data.map(a => ({
+                    ...a,
+                    _savingNote: false,
+                    _savedNote: false
+                }));
             }
         } catch (e) {
             console.error(e);
@@ -37,6 +43,28 @@
         }
     },
     
+    async saveQuickNote(acc) {
+        acc._savingNote = true;
+        acc._savedNote = false;
+        try {
+            const res = await fetch(`/api/v1/seeding/accounts/${acc.id}`, {
+                method: 'PUT',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ note: acc.note || '' })
+            });
+            if (res.ok) {
+                acc._savedNote = true;
+                setTimeout(() => { acc._savedNote = false; }, 2000);
+            } else {
+                window.showToast('Lỗi khi lưu ghi chú', 'error');
+            }
+        } catch (e) {
+            window.showToast('Lỗi kết nối khi lưu ghi chú', 'error');
+        } finally {
+            acc._savingNote = false;
+        }
+    },
+
     editAccount(acc) {
         this.editingId = acc.id;
         this.newAccount = {
@@ -45,14 +73,15 @@
             password: acc.password || '',
             two_fa_secret: acc.two_fa_secret || '',
             cookies: acc.cookies || '',
-            proxy: acc.proxy || ''
+            proxy: acc.proxy || '',
+            note: acc.note || ''
         };
         this.showModal = true;
     },
     
     openAddModal() {
         this.editingId = null;
-        this.newAccount = {platform: 'facebook', username: '', password: '', two_fa_secret: '', cookies: '', proxy: ''};
+        this.newAccount = {platform: 'facebook', username: '', password: '', two_fa_secret: '', cookies: '', proxy: '', note: ''};
         this.showModal = true;
     },
 
@@ -120,41 +149,58 @@
 }" class="max-w-6xl mx-auto space-y-6">
 
     <div class="flex justify-between items-center">
-        <h2 class="text-xl font-heading font-semibold text-white">Danh sách Tài khoản</h2>
-            <button @click="openAddModal()" class="btn btn-primary btn-sm">
-                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
-                Thêm Tài Khoản
-            </button>
+        <div>
+            <h2 class="text-xl font-heading font-semibold text-white">Danh sách Tài khoản</h2>
+            <p class="text-xs text-slate-400 mt-1">Quản lý và gắn ghi chú nhận diện các nick seeding Facebook / TikTok / YouTube</p>
+        </div>
+        <button @click="openAddModal()" class="btn btn-primary btn-sm flex items-center gap-1.5 px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition font-medium text-sm shadow-sm">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+            Thêm Tài Khoản
+        </button>
     </div>
 
-    <div class="card p-0 overflow-hidden bg-surface-secondary border border-slate-700/50 rounded-xl">
+    <div class="card p-0 overflow-hidden bg-surface-secondary border border-slate-700/50 rounded-xl shadow-lg">
         <table class="w-full text-left text-sm text-slate-300">
-            <thead class="bg-surface-tertiary text-slate-400">
+            <thead class="bg-surface-tertiary text-slate-400 border-b border-slate-700/50">
                 <tr>
                     <th class="px-6 py-4 font-medium uppercase text-xs">Nền tảng</th>
-                    <th class="px-6 py-4 font-medium uppercase text-xs">Username</th>
-                    <th class="px-6 py-4 font-medium uppercase text-xs">Trạng thái</th>
+                    <th class="px-6 py-4 font-medium uppercase text-xs">Username / UID</th>
+                    <th class="px-6 py-4 font-medium uppercase text-xs min-w-[240px]">Ghi chú (Tên gợi nhớ)</th>
+                    <th class="px-6 py-4 font-medium uppercase text-xs text-center">Trạng thái</th>
                     <th class="px-6 py-4 font-medium uppercase text-xs">Ngày thêm</th>
                     <th class="px-6 py-4 font-medium uppercase text-xs text-right">Thao tác</th>
                 </tr>
             </thead>
             <tbody class="divide-y divide-slate-700/50">
                 <template x-if="loading">
-                    <tr><td colspan="5" class="px-6 py-8 text-center text-slate-500">Đang tải dữ liệu...</td></tr>
+                    <tr><td colspan="6" class="px-6 py-8 text-center text-slate-500">Đang tải dữ liệu...</td></tr>
                 </template>
                 <template x-if="!loading && accounts.length === 0">
-                    <tr><td colspan="5" class="px-6 py-8 text-center text-slate-500">Chưa có tài khoản nào.</td></tr>
+                    <tr><td colspan="6" class="px-6 py-8 text-center text-slate-500">Chưa có tài khoản nào. Bấm 'Thêm Tài Khoản' để bắt đầu.</td></tr>
                 </template>
                 <template x-for="acc in accounts" :key="acc.id">
                     <tr class="hover:bg-slate-800/30 transition">
                         <td class="px-6 py-4 capitalize font-semibold" :class="{'text-blue-400': acc.platform=='facebook', 'text-slate-200': acc.platform=='tiktok', 'text-red-400': acc.platform=='youtube'}" x-text="acc.platform"></td>
-                        <td class="px-6 py-4" x-text="acc.username"></td>
-                        <td class="px-6 py-4">
-                            <span class="px-2.5 py-1 text-xs rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" x-show="acc.status == 'active'">Active</span>
-                            <span class="px-2.5 py-1 text-xs rounded-full bg-red-500/10 text-red-400 border border-red-500/20" x-show="acc.status != 'active'" x-text="acc.status"></span>
+                        <td class="px-6 py-4 font-mono text-sm" x-text="acc.username"></td>
+                        <td class="px-6 py-3">
+                            <div class="relative flex items-center group">
+                                <input type="text"
+                                    x-model="acc.note"
+                                    @change="saveQuickNote(acc)"
+                                    @keydown.enter="$el.blur()"
+                                    placeholder="Nhập ghi chú phân biệt nick..."
+                                    title="Nhập ghi chú rồi ấn Enter hoặc click ra ngoài để lưu tự động"
+                                    class="w-full text-xs px-3 py-1.5 bg-surface-input border border-slate-700/80 rounded-lg text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition pr-16 group-hover:border-slate-600">
+                                <span x-show="acc._savingNote" class="absolute right-2 text-[10px] text-amber-400 font-medium">Lưu...</span>
+                                <span x-show="acc._savedNote" class="absolute right-2 text-[10px] text-emerald-400 font-medium">✓ Đã lưu</span>
+                            </div>
                         </td>
-                        <td class="px-6 py-4 text-slate-400" x-text="new Date(acc.created_at).toLocaleDateString('vi-VN')"></td>
-                        <td class="px-6 py-4 text-right space-x-2">
+                        <td class="px-6 py-4 text-center">
+                            <span class="px-2.5 py-1 text-xs rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-medium" x-show="acc.status == 'active'">Active</span>
+                            <span class="px-2.5 py-1 text-xs rounded-full bg-red-500/10 text-red-400 border border-red-500/20 font-medium" x-show="acc.status != 'active'" x-text="acc.status"></span>
+                        </td>
+                        <td class="px-6 py-4 text-slate-400 text-xs" x-text="new Date(acc.created_at).toLocaleDateString('vi-VN')"></td>
+                        <td class="px-6 py-4 text-right space-x-2 whitespace-nowrap">
                             <button @click="editAccount(acc)" class="px-3 py-1.5 bg-slate-500/20 text-slate-300 hover:bg-slate-500/40 rounded-lg text-xs font-medium border border-slate-500/30 transition">Sửa</button>
                             <button @click="checkAccountLive(acc.id)" class="px-3 py-1.5 bg-indigo-500/20 text-indigo-400 hover:bg-indigo-500/40 rounded-lg text-xs font-medium border border-indigo-500/30 transition">Check Live</button>
                             <button @click="deleteAccount(acc.id)" class="px-3 py-1.5 bg-rose-500/20 text-rose-400 hover:bg-rose-500/40 rounded-lg text-xs font-medium border border-rose-500/30 transition">Xóa</button>
@@ -171,7 +217,7 @@
             <div class="flex min-h-screen items-center justify-center p-4 text-center">
             <div class="fixed inset-0 bg-black/60 backdrop-blur-sm" @click="showModal = false"></div>
             <div class="relative inline-block w-full max-w-md p-6 my-8 text-left align-middle bg-surface-secondary border border-slate-700 rounded-xl shadow-2xl max-h-[85vh] overflow-y-auto">
-                <h3 class="text-xl font-heading mb-4" x-text="editingId ? 'Cập Nhật Tài Khoản' : 'Thêm Tài Khoản Mới'"></h3>
+                <h3 class="text-xl font-heading mb-4 text-white font-semibold" x-text="editingId ? 'Cập Nhật Tài Khoản' : 'Thêm Tài Khoản Mới'"></h3>
             
             <div class="space-y-4">
                 <div>
@@ -183,8 +229,13 @@
                     </select>
                 </div>
                 <div>
-                    <label class="block text-sm text-slate-400 mb-1">Username / UID</label>
+                    <label class="block text-sm text-slate-400 mb-1">Username / UID <span class="text-rose-400">*</span></label>
                     <input type="text" x-model="newAccount.username" class="w-full p-2 bg-surface-input border border-slate-700 rounded-lg focus:border-blue-500 outline-none text-white" placeholder="VD: 1000xxxxxx">
+                </div>
+                <div>
+                    <label class="block text-sm text-slate-400 mb-1">Ghi chú / Tên gợi nhớ</label>
+                    <input type="text" x-model="newAccount.note" class="w-full p-2 bg-surface-input border border-slate-700 rounded-lg focus:border-blue-500 outline-none text-white text-sm" placeholder="VD: Nick chính chủ Dafa, Nick seeding nhóm Hải quan...">
+                    <p class="text-xs text-slate-500 mt-1">Dùng để phân biệt các tài khoản khi tạo chiến dịch seeding</p>
                 </div>
                 <div>
                     <label class="block text-sm text-slate-400 mb-1">Mật khẩu (Tùy chọn)</label>
@@ -200,7 +251,7 @@
                 </div>
                 <div>
                     <label class="block text-sm text-slate-400 mb-1">Proxy (Tùy chọn)</label>
-                    <input type="text" x-model="newAccount.proxy" class="w-full p-2 bg-surface-input border border-slate-700 rounded-lg focus:border-blue-500 outline-none text-white" placeholder="ip:port:user:pass">
+                    <input type="text" x-model="newAccount.proxy" class="w-full p-2 bg-surface-input border border-slate-700 rounded-lg focus:border-blue-500 outline-none text-white" placeholder="VD: socks5://user:pass@ip:port hoặc ip:port:user:pass">
                 </div>
             </div>
             

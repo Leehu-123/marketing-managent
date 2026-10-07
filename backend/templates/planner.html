@@ -166,8 +166,8 @@
                 core_theme: this.newCampaign.core_theme,
                 focus_products: this.newCampaign.focus_products,
                 main_keywords: this.newCampaign.main_keywords,
-                web_frequency: parseInt(this.newCampaign.web_frequency) || 3,
-                fanpage_frequency: parseInt(this.newCampaign.fanpage_frequency) || 4,
+                web_frequency: isNaN(parseInt(this.newCampaign.web_frequency)) ? 3 : parseInt(this.newCampaign.web_frequency),
+                fanpage_frequency: isNaN(parseInt(this.newCampaign.fanpage_frequency)) ? 4 : parseInt(this.newCampaign.fanpage_frequency),
                 web_content_pillars: this.serializePillars('web'),
                 fanpage_content_pillars: this.serializePillars('fanpage'),
                 campaign_type: 'SEO'

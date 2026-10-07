@@ -11,6 +11,58 @@ from api_client import APIClient
 from config import FB_MBASIC_URL
 
 
+async def like_post_before_comment(page, search_root):
+    """Thả Like bài viết trước khi comment. Hỗ trợ Desktop + mbasic."""
+    try:
+        # Kiểm tra đã Like chưa
+        # Desktop: check aria-label 'Bỏ thích' or 'Unlike'
+        already_liked = await page.query_selector("div[role='button'][aria-label*='Bỏ thích' i], div[role='button'][aria-label*='Unlike' i]")
+        if not already_liked:
+            # mbasic: check link 'Bỏ thích' or 'Unlike'
+            already_liked = await page.query_selector("a[href*='/a/like.php']:has-text('Bỏ thích'), a[href*='/nfx/basic/direct_actions/']:has-text('Bỏ thích')")
+        
+        if already_liked:
+            print("    ❤️ Bài viết đã được Like trước đó, bỏ qua.")
+            return True
+        
+        # --- Thử Like trên Desktop ---
+        like_button = None
+        # Tìm trong search_root trước (dialog nếu có)
+        if hasattr(search_root, 'query_selector'):
+            like_button = await search_root.query_selector("div[role='button'][aria-label*='Thích' i]:not([aria-label*='Bỏ thích' i])")
+            if not like_button:
+                like_button = await search_root.query_selector("div[role='button'][aria-label*='Like' i]:not([aria-label*='Unlike' i])")
+        
+        if like_button:
+            box = await like_button.bounding_box()
+            if box:
+                await like_button.scroll_into_view_if_needed()
+                await random_delay(1, 2)
+                await like_button.click()
+                print("    ❤️ Đã Like bài viết (Desktop mode)!")
+                return True
+        
+        # --- Thử Like trên mbasic ---
+        like_link = await page.query_selector("a[href*='/a/like.php']")
+        if not like_link:
+            # Fallback: tìm link có text 'Thích' trên mbasic
+            like_link = await page.query_selector("a[href*='/nfx/basic/direct_actions/']:has-text('Thích')")
+        
+        if like_link:
+            await random_delay(1, 2)
+            await like_link.click()
+            await page.wait_for_load_state("domcontentloaded")
+            print("    ❤️ Đã Like bài viết (mbasic mode)!")
+            return True
+        
+        print("    ⚠️ Không tìm thấy nút Like, bỏ qua.")
+        return False
+        
+    except Exception as e:
+        print(f"    ⚠️ Lỗi khi Like bài viết (không ảnh hưởng comment): {e}")
+        return False
+
+
 async def execute_comment_task(context: BrowserContext, task: Dict, api: APIClient, dry_run: bool = False) -> Dict:
     """
     Thực thi 1 task Comment trên Facebook (dùng mbasic.facebook.com).
@@ -71,18 +123,37 @@ async def execute_comment_task(context: BrowserContext, task: Dict, api: APIClie
         
         print(f"    📝 Nội dung bài viết: {post_content[:80]}...")
         
-        # --- Bước 4: Gọi AI sinh comment ---
+        # --- Bước 4: Gọi AI sinh comment (retry tối đa 3 lần) ---
         print(f"    🤖 Đang gọi AI sinh comment...")
-        generated_comment = api.generate_content(
-            post_content=post_content,
-            instruction=ai_instructions,
-            platform=task.get("platform", "facebook"),
-            task_type="COMMENT"
-        )
+        generated_comment = ""
+        for attempt in range(3):
+            generated_comment = await api.generate_content(
+                post_content=post_content,
+                instruction=ai_instructions,
+                platform=task.get("platform", "facebook"),
+                task_type="COMMENT"
+            )
+            if generated_comment:
+                break
+            print(f"    ⚠️ AI lần {attempt+1} không trả kết quả, thử lại...")
+            await asyncio.sleep(3 + attempt * 2)
         
         if not generated_comment:
-            result["error"] = "AI không trả về nội dung comment"
-            return result
+            # Fallback: chọn ngẫu nhiên từ danh sách bình luận đa dạng theo ngành kính DAFA Glass
+            fallback_pool = [
+                "Kính dán an toàn bên mình có những độ dày nào vậy shop? Cho mình xin thêm thông tin với ạ.",
+                "Bài viết chia sẻ rất hữu ích, mình đang tìm hiểu kính cho công trình nhà ở.",
+                "Sản phẩm kính DAFA trông chất lượng và hoàn thiện chuẩn quá, bên mình có nhận công trình ở khu vực phía Bắc không ạ?",
+                "Kính dán an toàn và kính cường lực loại nào phù hợp làm vách kính hơn shop tư vấn giúp mình nhé!",
+                "Kính nhìn sang và đẹp quá, cho mình xin thông tin liên hệ và báo giá tham khảo với ạ.",
+                "Chất lượng hoàn thiện rất tốt, lưu lại để khi nào hoàn thiện nhà liên hệ bên mình tư vấn.",
+                "Kính hộp cách âm cách nhiệt này độ bền ra sao vậy shop, dùng cho nhà hướng nắng nhiều có ổn không?",
+            ]
+            import random as rand_mod
+            seed_val = int(task.get("id") or 0) * 17 + int(task.get("account_id") or 0) * 31
+            rand_gen = rand_mod.Random(seed_val)
+            generated_comment = rand_gen.choice(fallback_pool)
+            print(f"    ⚠️ AI không trả về nội dung, dùng fallback đa dạng: {generated_comment[:50]}...")
         
         print(f"    💬 Comment AI: {generated_comment[:60]}...")
         result["content"] = generated_comment
@@ -93,6 +164,11 @@ async def execute_comment_task(context: BrowserContext, task: Dict, api: APIClie
             result["status"] = "success"
             return result
         
+        # --- Bước 5.5: Thả Like bài viết trước khi comment ---
+        print("    ❤️ Đang thả Like bài viết trước khi comment...")
+        await like_post_before_comment(page, search_root)
+        await random_delay(2, 4)
+        
         # --- Bước 6: Tìm ô comment và điền nội dung ---
         comment_success = await submit_comment(page, target_url, generated_comment)
         
@@ -100,7 +176,15 @@ async def execute_comment_task(context: BrowserContext, task: Dict, api: APIClie
             result["status"] = "success"
             print(f"    ✅ Comment thành công!")
         else:
-            result["error"] = "Không tìm thấy ô comment hoặc không thể gửi"
+            current_url = page.url.lower()
+            if "checkpoint" in current_url:
+                result["error"] = "Tài khoản bị Facebook checkpoint (cần xác minh danh tính)"
+                print(f"    ⚠️ Tài khoản bị checkpoint: {page.url}")
+            elif "login" in current_url:
+                result["error"] = "Phiên đăng nhập hết hạn (cookie không còn hiệu lực)"
+                print(f"    ⚠️ Phiên đăng nhập hết hạn: {page.url}")
+            else:
+                result["error"] = "Không tìm thấy ô comment hoặc không thể gửi"
             
     except Exception as e:
         result["error"] = str(e)
@@ -142,6 +226,24 @@ def convert_to_mbasic_url(url: str) -> str:
 
 async def scrape_post_content(root) -> str:
     """Scrape nội dung bài viết từ root element (Page hoặc Dialog element)."""
+    # Thử click "Xem thêm" / "See more" để lấy đầy đủ nội dung bài viết / Reel
+    try:
+        see_more_selectors = [
+            "div[role='button']:has-text('Xem thêm')",
+            "div[role='button']:has-text('See more')",
+            "span:has-text('Xem thêm')",
+            "span:has-text('See more')",
+            "a:has-text('Xem thêm')",
+        ]
+        for sel in see_more_selectors:
+            btn = await root.query_selector(sel)
+            if btn:
+                await btn.click()
+                await asyncio.sleep(0.5)
+                break
+    except Exception:
+        pass
+
     selectors = [
         # Modern Facebook / Desktop React selectors (ưu tiên)
         "div[data-ad-preview='message']",
@@ -199,13 +301,53 @@ async def submit_comment(page: Page, target_url: str, comment_text: str) -> bool
                 search_root = dialog
                 break
     
-    # --- Bước 1: Tìm và click nút mở bình luận (trong search_root) ---
-    # Desktop Facebook luôn hiện sẵn ô comment ở dưới cùng, không cần click nút mở.
-    # Click nút mở có thể vô tình click vào thẻ <a> dẫn đến đóng dialog hoặc tải lại trang.
-    # open_comment_btn_selectors = [ ... ]
-    # for btn_sel in open_comment_btn_selectors: ...
+    # --- Bước 1: Tìm và click nút mở bình luận (nếu là bài Reel / Video) ---
+    is_reel = "/reel/" in target_url.lower() or "/watch/" in target_url.lower()
+    if is_reel:
+        print("    🎬 Phát hiện bài viết dạng Facebook Reel / Video. Đang tìm nút mở bình luận...")
+        reel_comment_selectors = [
+            "div[role='button'][aria-label='Bình luận']",
+            "div[role='button'][aria-label='Comment']",
+            "div[role='button'][aria-label*='Bình luận' i]",
+            "div[role='button'][aria-label*='Comment' i]",
+            "div[aria-label='Bình luận'][role='button']",
+            "div[aria-label='Comment'][role='button']",
+        ]
+        for sel in reel_comment_selectors:
+            try:
+                btns = await page.query_selector_all(sel)
+                clicked = False
+                for b in btns:
+                    box = await b.bounding_box()
+                    if box and box['width'] > 0 and box['height'] > 0:
+                        await b.click()
+                        print("    🔘 Đã click nút mở bình luận Reel, chờ panel xuất hiện...")
+                        await random_delay(2, 4)
+                        clicked = True
+                        break
+                if clicked:
+                    break
+            except Exception:
+                continue
 
     # --- Bước 2: Tìm ô nhập bình luận (trong search_root) ---
+    comment_input = None
+    
+    # Nếu là bài Reel, đợi skeleton loading hoàn tất để ô textbox xuất hiện
+    if is_reel:
+        try:
+            print("    ⏳ Đang đợi khung bình luận Reel tải xong (skeleton load)...")
+            inp = await page.wait_for_selector(
+                "div[role='textbox'][contenteditable='true'], div[contenteditable='true'][aria-label*='bình luận' i], div[contenteditable='true'][aria-label*='comment' i]",
+                timeout=12000
+            )
+            if inp:
+                box = await inp.bounding_box()
+                if box and box['width'] > 0 and box['height'] > 0:
+                    comment_input = inp
+        except Exception:
+            pass
+
     comment_selectors = [
         # Desktop generic (robust nhất)
         "div[role='textbox'][contenteditable='true']",
@@ -219,20 +361,35 @@ async def submit_comment(page: Page, target_url: str, comment_text: str) -> bool
         "div[contenteditable='true'][aria-label*='Viết' i]",
     ]
     
-    comment_input = None
-    for selector in comment_selectors:
-        try:
-            inputs = await search_root.query_selector_all(selector)
-            for inp in inputs:
-                box = await inp.bounding_box()
-                if box and box['width'] > 0 and box['height'] > 0:
-                    comment_input = inp
+    if not comment_input:
+        for selector in comment_selectors:
+            try:
+                inputs = await search_root.query_selector_all(selector)
+                for inp in inputs:
+                    box = await inp.bounding_box()
+                    if box and box['width'] > 0 and box['height'] > 0:
+                        comment_input = inp
+                        break
+                if comment_input:
                     break
-            if comment_input:
-                break
-        except Exception:
-            continue
+            except Exception:
+                continue
             
+    # Nếu chưa tìm thấy và search_root != page, tìm tiếp trên phạm vi page
+    if not comment_input and search_root != page:
+        for selector in comment_selectors:
+            try:
+                inputs = await page.query_selector_all(selector)
+                for inp in inputs:
+                    box = await inp.bounding_box()
+                    if box and box['width'] > 0 and box['height'] > 0:
+                        comment_input = inp
+                        break
+                if comment_input:
+                    break
+            except Exception:
+                continue
+
     if not comment_input:
         return False
         
@@ -352,7 +509,7 @@ async def execute_reply_task(context: BrowserContext, task: Dict, api: APIClient
             print(f"    ⚠️ Không tìm thấy comment cha, chuyển sang comment thường")
             reply_content = generated_content
             if not reply_content:
-                reply_content = api.generate_content(
+                reply_content = await api.generate_content(
                     post_content=parent_comment or target_url,
                     instruction=ai_instructions,
                     platform=task.get("platform", "facebook"),
@@ -384,7 +541,7 @@ async def execute_reply_task(context: BrowserContext, task: Dict, api: APIClient
         # --- Bước 4: Sinh hoặc sử dụng nội dung reply ---
         reply_content = generated_content
         if not reply_content:
-            reply_content = api.generate_content(
+            reply_content = await api.generate_content(
                 post_content=parent_comment,
                 instruction=ai_instructions,
                 platform=task.get("platform", "facebook"),
@@ -426,7 +583,7 @@ async def find_comment_element(root, comment_text: str):
     if not comment_text or len(comment_text.strip()) < 5:
         return None
     
-    # Lấy tất cả các comment blocks
+    # Lấy tất cả các comment blocks (dùng selector cụ thể, KHÔNG quét toàn bộ div)
     comment_selectors = [
         "div[role='article']",  # Desktop React comment blocks
         "div[data-testid='UFI2Comment/body']",
@@ -439,25 +596,42 @@ async def find_comment_element(root, comment_text: str):
         try:
             elements = await root.query_selector_all(selector)
             for el in elements:
-                text = await el.inner_text()
-                if search_text in text.lower():
-                    return el
+                try:
+                    text = await el.inner_text()
+                    if search_text in text.lower():
+                        return el
+                except Exception:
+                    continue
         except Exception:
             continue
     
-    # Fallback: tìm bất kỳ element nào chứa text
+    # Fallback: dùng page.evaluate để tìm trong JS (KHÔNG kéo ElementHandle)
     try:
-        all_divs = await root.query_selector_all("div")
-        for div in all_divs:
-            try:
-                text = await div.inner_text()
-                if len(text) < 500 and search_text in text.lower():
-                    # Kiểm tra xem div này có nhỏ gọn (là comment) không
-                    box = await div.bounding_box()
-                    if box and 50 < box['height'] < 400:
-                        return div
-            except Exception:
-                continue
+        result = await root.evaluate('''
+            (searchText) => {
+                const divs = document.querySelectorAll('div');
+                for (const div of divs) {
+                    const text = div.innerText || '';
+                    if (text.length < 500 && text.length > 10 && text.toLowerCase().includes(searchText)) {
+                        const rect = div.getBoundingClientRect();
+                        if (rect.height > 50 && rect.height < 400) {
+                            return true;
+                        }
+                    }
+                }
+                return false;
+            }
+        ''', search_text)
+        # Nếu tìm thấy, dùng locator chính xác hơn
+        if result:
+            elements = await root.query_selector_all('div[role="article"], div[data-testid]')
+            for el in elements:
+                try:
+                    text = await el.inner_text()
+                    if search_text in text.lower():
+                        return el
+                except Exception:
+                    continue
     except Exception:
         pass
     

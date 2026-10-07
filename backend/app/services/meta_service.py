@@ -29,20 +29,11 @@ class MetaService:
         body: str,
         post_format: str = "Image post",
         media_url: Optional[str] = None,
+        media_urls: Optional[list] = None,
     ) -> dict:
         """
         Publish a post to the configured Facebook Fanpage.
-
-        Args:
-            title: The post title (used as part of the message).
-            body: The main content/body text of the post.
-            post_format: One of 'Image post', 'Video', or 'Long article' (text).
-            media_url: URL or local path to the media file (for image/video posts).
-
-        Returns:
-            dict with keys: success (bool), post_id (str), url (str), error (str|None)
         """
-        # Prioritize active Fanpage integration configured in DB
         from app.core.database import SessionLocal
         from app.models.setting import IntegrationSetting
         
@@ -56,12 +47,12 @@ class MetaService:
             db.close()
 
         if meta_setting and meta_setting.url and meta_setting.access_token:
-            return await MetaService._real_publish(title, body, post_format, media_url)
+            return await MetaService._real_publish(title, body, post_format, media_url, media_urls)
 
         if settings.MOCK_META:
-            return MetaService._mock_publish(title, body, post_format, media_url)
+            return MetaService._mock_publish(title, body, post_format, media_url, media_urls)
         else:
-            return await MetaService._real_publish(title, body, post_format, media_url)
+            return await MetaService._real_publish(title, body, post_format, media_url, media_urls)
 
     @staticmethod
     def _mock_publish(
@@ -69,6 +60,7 @@ class MetaService:
         body: str,
         post_format: str,
         media_url: Optional[str],
+        media_urls: Optional[list] = None,
     ) -> dict:
         """Simulate publishing a post to Facebook Fanpage in MOCK mode."""
         fake_post_id = f"{settings.META_PAGE_ID}_{random.randint(100000000000, 999999999999)}"
@@ -79,8 +71,9 @@ class MetaService:
             f"[MOCK META] Published {format_label} to Fanpage: "
             f"title='{title[:50]}...', post_id={fake_post_id}"
         )
-        if media_url:
-            logger.info(f"[MOCK META] Media attached: {media_url}")
+        all_urls = media_urls if media_urls else ([media_url] if media_url else [])
+        if all_urls:
+            logger.info(f"[MOCK META] Media attached: {all_urls}")
 
         print(f"[MOCK META] ✅ Successfully published {format_label} post.")
         print(f"[MOCK META]    Post ID : {fake_post_id}")
@@ -99,10 +92,12 @@ class MetaService:
         body: str,
         post_format: str,
         media_url: Optional[str],
+        media_urls: Optional[list] = None,
     ) -> dict:
         """Publish a post using the real Meta Graph API."""
         from app.core.database import SessionLocal
         from app.models.setting import IntegrationSetting
+        import json
         
         db = SessionLocal()
         try:
@@ -121,14 +116,52 @@ class MetaService:
             logger.error(f"[META] {error_msg}")
             return {"success": False, "post_id": None, "url": None, "error": error_msg}
 
-        message_text = f"{title}\n\n{body}"
+        fanpage_signature = (
+            "\n\n------------------\n"
+            "DAFA Glass - Kính chuẩn, Nhà sang\n"
+            "Website: https://dafaglass.com/\n"
+            "Fanpage: https://www.facebook.com/dafaglass\n"
+            "Instagram: https://www.instagram.com/dafagroupvn/\n"
+            "Tiktok: https://www.tiktok.com/@dafa.glass\n"
+            "Youtube: https://www.youtube.com/@Dafaglass\n"
+            "Địa chỉ: Lô 32, đường Thủ Dầu Một, Cụm công nghiệp Bắc Duyên Hải, Phường Lào Cai, Tỉnh Lào Cai\n"
+            "Số điện thoại: 0588.88.7989"
+        )
+        message_text = f"{title}\n\n{body}{fanpage_signature}"
+        all_urls = media_urls if media_urls and len(media_urls) > 0 else ([media_url] if media_url else [])
+
+        # Tự động nhận diện định dạng thực tế từ phần mở rộng file media
+        # Ngăn chặn trường hợp content_plan ghi "Video" nhưng user lại upload ảnh PNG/JPG dẫn đến bị biến thành Reel
+        video_extensions = ('.mp4', '.mov', '.avi', '.webm', '.mkv')
+        image_extensions = ('.png', '.jpg', '.jpeg', '.webp', '.gif')
+        
+        has_video = False
+        has_image = False
+        check_urls = list(all_urls)
+        if media_url and media_url not in check_urls:
+            check_urls.append(media_url)
+            
+        for u in check_urls:
+            clean_u = u.lower().split('?')[0].strip()
+            if any(clean_u.endswith(ext) for ext in video_extensions):
+                has_video = True
+            elif any(clean_u.endswith(ext) for ext in image_extensions):
+                has_image = True
+
+        effective_format = post_format.lower()
+        if has_video:
+            effective_format = "video"
+        elif has_image:
+            effective_format = "image post"
+            
+        logger.info(f"[META] post_format='{post_format}', media detected -> effective_format='{effective_format}'")
 
         try:
             async with httpx.AsyncClient(timeout=60.0) as client:
                 # ----------------------------------------------------------
                 # TEXT POST  (Long article / default fallback)
                 # ----------------------------------------------------------
-                if post_format.lower() in ("long article", "text"):
+                if effective_format in ("long article", "text") and not all_urls:
                     endpoint = f"{META_GRAPH_API_BASE}/me/feed"
                     payload = {
                         "message": message_text,
@@ -139,47 +172,49 @@ class MetaService:
                 # ----------------------------------------------------------
                 # IMAGE POST
                 # ----------------------------------------------------------
-                elif post_format.lower() == "image post":
-                    if media_url:
-                        # Step 1: Upload photo as unpublished
+                elif effective_format == "image post" or (has_image and not has_video):
+                    if all_urls:
+                        fbids = []
                         upload_endpoint = f"{META_GRAPH_API_BASE}/me/photos"
-                        upload_payload = {
-                            "published": "false",
-                            "access_token": access_token,
-                        }
-                        
-                        media_fbid = None
-                        if media_url.startswith("http"):
-                            upload_payload["url"] = media_url
-                            upload_response = await client.post(upload_endpoint, data=upload_payload)
-                            upload_response.raise_for_status()
-                            media_fbid = upload_response.json().get("id")
-                        else:
-                            from app.core.config import settings
-                            import os
-                            local_path = str(settings.UPLOAD_DIR / media_url.strip("/").replace("uploads/", ""))
-                            if os.path.exists(local_path):
-                                with open(local_path, "rb") as f:
-                                    file_content = f.read()
-                                files = {"source": ("image.png", file_content, "image/png")}
-                                upload_response = await client.post(upload_endpoint, data=upload_payload, files=files)
+                        for url in all_urls:
+                            upload_payload = {
+                                "published": "false",
+                                "access_token": access_token,
+                            }
+                            media_fbid = None
+                            if url.startswith("http"):
+                                upload_payload["url"] = url
+                                upload_response = await client.post(upload_endpoint, data=upload_payload)
                                 upload_response.raise_for_status()
                                 media_fbid = upload_response.json().get("id")
                             else:
-                                logger.error(f"[META] Image file not found: {local_path}")
-                                return {"success": False, "post_id": None, "url": None, "error": f"Image file not found: {media_url}"}
-                        
+                                from app.core.config import settings
+                                import os
+                                local_path = str(settings.UPLOAD_DIR / url.strip("/").replace("uploads/", ""))
+                                if os.path.exists(local_path):
+                                    with open(local_path, "rb") as f:
+                                        file_content = f.read()
+                                    files = {"source": ("image.png", file_content, "image/png")}
+                                    upload_response = await client.post(upload_endpoint, data=upload_payload, files=files)
+                                    upload_response.raise_for_status()
+                                    media_fbid = upload_response.json().get("id")
+                                else:
+                                    logger.error(f"[META] Image file not found: {local_path}")
+                            if media_fbid:
+                                fbids.append(media_fbid)
+
                         # Step 2: Create Feed Post with attached media
-                        if media_fbid:
+                        if fbids:
                             feed_endpoint = f"{META_GRAPH_API_BASE}/me/feed"
+                            attached_media = json.dumps([{"media_fbid": fbid} for fbid in fbids])
                             feed_payload = {
                                 "message": message_text,
-                                "attached_media": f'[{{"media_fbid":"{media_fbid}"}}]',
+                                "attached_media": attached_media,
                                 "access_token": access_token
                             }
                             response = await client.post(feed_endpoint, data=feed_payload)
                         else:
-                            return {"success": False, "post_id": None, "url": None, "error": "Failed to upload unpublished photo"}
+                            return {"success": False, "post_id": None, "url": None, "error": "Failed to upload any photo"}
                     else:
                         endpoint = f"{META_GRAPH_API_BASE}/me/feed"
                         payload = {"message": message_text, "access_token": access_token}
@@ -188,8 +223,8 @@ class MetaService:
                 # ----------------------------------------------------------
                 # VIDEO POST
                 # ----------------------------------------------------------
-                elif post_format.lower() == "video":
-                    endpoint = f"{META_GRAPH_API_BASE}/{page_id}/videos"
+                elif effective_format == "video" and has_video:
+                    endpoint = f"{META_GRAPH_API_BASE}/me/videos"
                     payload = {
                         "description": message_text,
                         "access_token": access_token,
@@ -211,7 +246,7 @@ class MetaService:
                                 logger.error(f"[META] Video file not found: {local_path}")
                                 return {"success": False, "post_id": None, "url": None, "error": f"Video file not found: {media_url}"}
                     else:
-                        endpoint = f"{META_GRAPH_API_BASE}/{page_id}/feed"
+                        endpoint = f"{META_GRAPH_API_BASE}/me/feed"
                         payload = {"message": message_text, "access_token": access_token}
                         response = await client.post(endpoint, data=payload)
 
@@ -222,7 +257,7 @@ class MetaService:
                     logger.warning(
                         f"[META] Unknown post format '{post_format}', falling back to text post."
                     )
-                    endpoint = f"{META_GRAPH_API_BASE}/{page_id}/feed"
+                    endpoint = f"{META_GRAPH_API_BASE}/me/feed"
                     payload = {
                         "message": message_text,
                         "access_token": access_token,

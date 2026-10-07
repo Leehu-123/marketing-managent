@@ -11,16 +11,20 @@ class SeedingAccountBase(BaseModel):
     access_token: Optional[str] = None
     proxy: Optional[str] = None
     status: Optional[str] = "active"
+    note: Optional[str] = None
 
 class SeedingAccountCreate(SeedingAccountBase):
     pass
 
 class SeedingAccountUpdate(BaseModel):
+    username: Optional[str] = None
     password: Optional[str] = None
+    two_fa_secret: Optional[str] = None
     cookies: Optional[str] = None
     access_token: Optional[str] = None
     proxy: Optional[str] = None
     status: Optional[str] = None
+    note: Optional[str] = None
 
 class SeedingAccountResponse(SeedingAccountBase):
     id: int
@@ -57,16 +61,25 @@ class SeedingCampaignUpdate(BaseModel):
     daily_schedule_time: Optional[str] = None
     is_daily_repeat: Optional[bool] = None
     campaign_type: Optional[str] = None
+    rerun: Optional[bool] = False
 
 class SeedingCampaignResponse(SeedingCampaignBase):
     id: int
     created_at: datetime
-    today_total: Optional[int] = 0
-    today_success: Optional[int] = 0
-    today_failed: Optional[int] = 0
-    today_pending: Optional[int] = 0
-    today_status_label: Optional[str] = None
-    last_run_at: Optional[datetime] = None
+    total_tasks: Optional[int] = 0
+    completed_tasks: Optional[int] = 0
+    failed_tasks: Optional[int] = 0
+    in_progress_tasks: Optional[int] = 0
+    pending_tasks: Optional[int] = 0
+    progress_percent: Optional[int] = 0
+    # Các trường cho lần chạy hiện tại / gần nhất (đặc biệt cho chiến dịch hàng ngày)
+    current_run_total: Optional[int] = 0
+    current_run_completed: Optional[int] = 0
+    current_run_failed: Optional[int] = 0
+    current_run_in_progress: Optional[int] = 0
+    current_run_pending: Optional[int] = 0
+    current_run_percent: Optional[int] = 0
+    current_run_date: Optional[str] = None
 
     class Config:
         from_attributes = True

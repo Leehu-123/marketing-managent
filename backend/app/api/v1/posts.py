@@ -1,7 +1,7 @@
 from typing import List
 import shutil
 from pathlib import Path
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status, Body
 from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.config import settings
@@ -103,11 +103,19 @@ async def publish_post_now(id: int, db: Session = Depends(get_db)):
         )
     elif platform == "Fanpage":
         from app.services.meta_service import MetaService
+        import json
+        m_urls = []
+        if db_post.media_urls:
+            try:
+                m_urls = json.loads(db_post.media_urls)
+            except:
+                pass
         result = await MetaService.publish_post(
             title=db_post.title,
             body=db_post.body or "",
             post_format=post_format,
             media_url=db_post.media_url,
+            media_urls=m_urls,
         )
     else:
         from app.services.cms_service import CMSService
@@ -125,6 +133,14 @@ async def publish_post_now(id: int, db: Session = Depends(get_db)):
         db_post.published_url = result.get("url", "")
         db.commit()
         db.refresh(db_post)
+        
+        # Auto-sync sang Google Sheets
+        try:
+            from app.services.google_sheets_service import sync_published_post_to_sheets
+            sync_published_post_to_sheets(db_post, db)
+        except Exception as e:
+            print(f"[SHEETS HOOK] Lỗi sync bài đăng mới: {e}")
+            
         return db_post
     else:
         error_msg = result.get("error", "Đăng bài thất bại") if result else "Không có phản hồi từ dịch vụ"
@@ -328,6 +344,17 @@ Strictly no text, no letters, no logo, no watermark, no poster, no collage, no d
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Lỗi tạo ảnh: {str(e)}")
+
+@router.post("/{id}/translate", response_model=schemas.PostResponse)
+def translate_post(id: int, request_data: dict = Body(...), db: Session = Depends(get_db)):
+    """
+    Website dafaglass.com chỉ sử dụng Tiếng Việt đơn ngữ.
+    Endpoint này giữ lại để tương thích ngược.
+    """
+    db_post = db.query(models.Post).filter(models.Post.id == id).first()
+    if not db_post:
+        raise HTTPException(status_code=404, detail="Không tìm thấy bài viết")
+    return db_post
 
 # Cần import datetime vì trong tên file có sử dụng datetime
 from datetime import datetime

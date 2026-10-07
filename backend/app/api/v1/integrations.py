@@ -128,3 +128,88 @@ def google_auth_callback(req: Request, code: str, db: Session = Depends(get_db))
         return RedirectResponse(url="/settings?success=google_connected")
     except Exception as e:
         return RedirectResponse(url=f"/settings?error={str(e)}")
+
+# --- Google Sheets Integration ---
+from pydantic import BaseModel
+
+class GoogleSheetsConfig(BaseModel):
+    spreadsheet_id: str
+    credentials_json: str
+    auto_sync: bool = True
+
+@router.post("/google-sheets/config")
+def save_google_sheets_config(config: GoogleSheetsConfig, db: Session = Depends(get_db)):
+    """Lưu cấu hình Google Sheets cho báo cáo Seeding."""
+    db_setting = db.query(models.IntegrationSetting).filter(
+        models.IntegrationSetting.platform == "GoogleSheets"
+    ).first()
+    
+    if not db_setting:
+        db_setting = models.IntegrationSetting(platform="GoogleSheets")
+        db.add(db_setting)
+    
+    db_setting.url = config.spreadsheet_id.strip()
+    if config.credentials_json and config.credentials_json != "__KEEP_EXISTING__":
+        db_setting.access_token = config.credentials_json.strip()
+    db_setting.is_active = config.auto_sync
+    db.commit()
+    
+    return {"status": "success", "message": "Đã lưu cấu hình Google Sheets"}
+
+@router.get("/google-sheets/config")
+def get_google_sheets_config(db: Session = Depends(get_db)):
+    """Đọc cấu hình Google Sheets hiện tại."""
+    db_setting = db.query(models.IntegrationSetting).filter(
+        models.IntegrationSetting.platform == "GoogleSheets"
+    ).first()
+    
+    if not db_setting:
+        return {
+            "spreadsheet_id": "",
+            "has_credentials": False,
+            "auto_sync": False
+        }
+    
+    return {
+        "spreadsheet_id": db_setting.url or "",
+        "has_credentials": bool(db_setting.access_token),
+        "auto_sync": db_setting.is_active if db_setting.is_active is not None else False
+    }
+
+@router.post("/google-sheets/test")
+def test_google_sheets_connection(db: Session = Depends(get_db)):
+    """Kiểm tra kết nối Google Sheets."""
+    from app.services.google_sheets_service import get_google_sheets_service
+    
+    sheets_service = get_google_sheets_service(db)
+    if not sheets_service:
+        raise HTTPException(status_code=400, detail="Chưa cấu hình Google Sheets. Vui lòng nhập Spreadsheet ID và Service Account JSON.")
+    
+    try:
+        # Try to read spreadsheet metadata
+        result = sheets_service.service.spreadsheets().get(
+            spreadsheetId=sheets_service.spreadsheet_id
+        ).execute()
+        title = result.get('properties', {}).get('title', 'Unknown')
+        return {
+            "status": "success",
+            "message": f"Kết nối thành công! Spreadsheet: {title}"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Lỗi kết nối: {str(e)}")
+
+@router.post("/google-sheets/sync-history")
+def sync_google_sheets_history(clear_existing: bool = False, db: Session = Depends(get_db)):
+    """Đồng bộ toàn bộ lịch sử các bài đã đăng thành công (Website, Fanpage, Seeding) vào Google Sheets."""
+    from app.services.google_sheets_service import get_google_sheets_service
+    
+    sheets_service = get_google_sheets_service(db, require_active=False)
+    if not sheets_service:
+        raise HTTPException(status_code=400, detail="Chưa cấu hình Google Sheets. Vui lòng kiểm tra Spreadsheet ID và Service Account JSON.")
+        
+    try:
+        result = sheets_service.sync_all_history(db, clear_existing_sheets=clear_existing)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Lỗi khi đồng bộ dữ liệu: {str(e)}")
+

@@ -18,11 +18,11 @@ class Settings:
     DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./dafa_glass.db")
     
     # Mock Settings
-    MOCK_AI: bool = os.getenv("MOCK_AI", "true").lower() == "true"
-    MOCK_META: bool = os.getenv("MOCK_META", "true").lower() == "true"
-    MOCK_CMS: bool = os.getenv("MOCK_CMS", "true").lower() == "true"
-    MOCK_ANALYTICS: bool = os.getenv("MOCK_ANALYTICS", "true").lower() == "true"
-    MOCK_IMAGE_GEN: bool = os.getenv("MOCK_IMAGE_GEN", "true").lower() == "true"
+    MOCK_AI: bool = os.getenv("MOCK_AI", "false").lower() == "true"
+    MOCK_META: bool = os.getenv("MOCK_META", "false").lower() == "true"
+    MOCK_CMS: bool = os.getenv("MOCK_CMS", "false").lower() == "true"
+    MOCK_ANALYTICS: bool = os.getenv("MOCK_ANALYTICS", "false").lower() == "true"
+    MOCK_IMAGE_GEN: bool = os.getenv("MOCK_IMAGE_GEN", "false").lower() == "true"
     
     # OpenAI
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")

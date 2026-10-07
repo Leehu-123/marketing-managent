@@ -8,6 +8,7 @@ import argparse
 import sys
 import time
 import random
+import traceback
 from typing import List, Dict
 
 # Fix encoding for Windows Console
@@ -36,7 +37,7 @@ def print_banner():
     """Hiển thị banner khi khởi động tool."""
     banner = """
 ╔═══════════════════════════════════════════════════╗
-║        🚀 SEEDING AUTOMATION TOOL v1.0 🚀         ║
+║        🚀 SEEDING AUTOMATION TOOL v2.0 🚀         ║
 ║                                                   ║
 ║    Tự động Comment dạo + Đăng bài Hội nhóm       ║
 ║    Kết nối: Backend Web Quản Lý                   ║
@@ -85,16 +86,17 @@ async def process_task(task: Dict, api: APIClient, browser_mgr: BrowserManager, 
     if not task.get("account_cookies"):
         error_msg = "Tài khoản chưa có Cookies - không thể chạy."
         console.print(f"    [red]❌ {error_msg}[/red]")
-        api.report_result(task_id, "failed", error_message=error_msg, account_id=task.get("account_id"))
+        await api.report_result(task_id, "failed", error_message=error_msg, account_id=task.get("account_id"))
         return {"status": "failed", "error": error_msg}
     
-    # Tạo browser context với proxy + cookies
-    context = await browser_mgr.create_context(
-        cookies_str=task.get("account_cookies"),
-        proxy_str=task.get("account_proxy")
-    )
-    
+    context = None
     try:
+        # Tạo browser context với proxy + cookies
+        context = await browser_mgr.create_context(
+            cookies_str=task.get("account_cookies"),
+            proxy_str=task.get("account_proxy")
+        )
+        
         if task_type == "COMMENT":
             from tasks.facebook_comment import execute_comment_task
             result = await execute_comment_task(context, task, api, dry_run=dry_run)
@@ -108,18 +110,30 @@ async def process_task(task: Dict, api: APIClient, browser_mgr: BrowserManager, 
             result = {"status": "failed", "content": "", "error": f"Loại task không hỗ trợ: {task_type}"}
         
         # Báo cáo kết quả về Backend
-        api.report_result(
+        reported = await api.report_result(
             task_id=task_id,
             status=result["status"],
             generated_content=result.get("content"),
             error_message=result.get("error"),
             account_id=task.get("account_id")
         )
+        if not reported:
+            console.print(f"    [yellow]⚠️ Không thể báo cáo kết quả task #{task_id} về Backend[/yellow]")
         
         return result
         
+    except Exception as e:
+        error_msg = f"Exception khi xử lý task: {str(e)}"
+        console.print(f"    [red]❌ {error_msg}[/red]")
+        # Cố gắng báo cáo lỗi về backend
+        try:
+            await api.report_result(task_id, "failed", error_message=error_msg, account_id=task.get("account_id"))
+        except Exception:
+            pass
+        return {"status": "failed", "error": error_msg}
     finally:
-        await browser_mgr.close_context(context)
+        if context:
+            await browser_mgr.close_context(context)
 
 
 async def run_worker(tasks: List[Dict], api: APIClient, headless: bool, dry_run: bool):
@@ -132,17 +146,26 @@ async def run_worker(tasks: List[Dict], api: APIClient, headless: bool, dry_run:
     
     try:
         for i, task in enumerate(tasks):
-            result = await process_task(task, api, browser_mgr, dry_run=dry_run)
-            
-            if result.get("status") == "success":
-                success_count += 1
-            else:
+            try:
+                result = await process_task(task, api, browser_mgr, dry_run=dry_run)
+                
+                if result.get("status") == "success":
+                    success_count += 1
+                else:
+                    fail_count += 1
+            except Exception as e:
+                console.print(f"    [red]❌ Worker exception trên task #{task.get('id', '?')}: {e}[/red]")
                 fail_count += 1
             
             # Delay giữa các task
             if i < len(tasks) - 1:
-                delay = random.uniform(TASK_DELAY_MIN, TASK_DELAY_MAX)
-                console.print(f"    ⏳ Chờ {delay:.0f}s trước task tiếp theo...")
+                current_type = task.get("campaign_type", "COMMENT")
+                if current_type == "POST_GROUP":
+                    delay = random.uniform(120, 240)
+                    console.print(f"    ⏳ Giãn cách an toàn đăng nhóm (Anti-Spam): chờ {delay:.0f}s trước task tiếp theo...")
+                else:
+                    delay = random.uniform(TASK_DELAY_MIN, TASK_DELAY_MAX)
+                    console.print(f"    ⏳ Chờ {delay:.0f}s trước task tiếp theo...")
                 await asyncio.sleep(delay)
     finally:
         await browser_mgr.stop()
@@ -165,61 +188,88 @@ async def main_loop(platform: str, workers: int, backend_url: str, headless: boo
     total_success = 0
     total_failed = 0
     poll_count = 0
+    consecutive_errors = 0
     
-    while True:
-        poll_count += 1
-        console.rule(f"[bold]Lần poll #{poll_count}[/bold]")
-        
-        # Fetch tasks từ Backend
-        console.print("  📡 Đang lấy nhiệm vụ từ Backend...")
-        tasks = api.fetch_tasks(platform, limit=TASKS_PER_POLL)
-        
-        if not tasks:
-            console.print("  [yellow]📭 Không có nhiệm vụ nào đang chờ.[/yellow]")
-            if once:
-                break
-            console.print(f"  ⏳ Chờ {POLL_INTERVAL}s rồi thử lại...")
-            await asyncio.sleep(POLL_INTERVAL)
-            continue
-        
-        console.print(f"  ✅ Nhận được [bold]{len(tasks)}[/bold] nhiệm vụ!")
-        display_tasks_table(tasks)
-        
-        # Phân bổ tasks cho workers
-        if workers == 1 or len(tasks) <= 1:
-            # Chạy tuần tự
-            result = await run_worker(tasks, api, headless, dry_run)
-            total_success += result["success"]
-            total_failed += result["failed"]
-        else:
-            # Chia tasks cho nhiều workers
-            chunks = [[] for _ in range(min(workers, len(tasks)))]
-            for i, task in enumerate(tasks):
-                chunks[i % len(chunks)].append(task)
-            
-            # Chạy song song
-            worker_tasks = [
-                run_worker(chunk, api, headless, dry_run)
-                for chunk in chunks if chunk
-            ]
-            results = await asyncio.gather(*worker_tasks)
-            
-            for r in results:
-                total_success += r["success"]
-                total_failed += r["failed"]
-        
-        # Hiển thị tổng kết
-        console.print(f"\n  📊 [bold]Tổng kết:[/bold] ✅ {total_success} thành công | ❌ {total_failed} thất bại")
-        
-        if once:
-            break
-        
-        # Delay giữa các lần poll
-        delay = random.uniform(ACCOUNT_DELAY_MIN, ACCOUNT_DELAY_MAX)
-        console.print(f"  ⏳ Chờ {delay:.0f}s trước lần poll tiếp theo...")
-        await asyncio.sleep(delay)
-    
-    api.close()
+    try:
+        while True:
+            try:
+                poll_count += 1
+                console.rule(f"[bold]Lần poll #{poll_count}[/bold]")
+                
+                # Fetch tasks từ Backend
+                console.print("  📡 Đang lấy nhiệm vụ từ Backend...")
+                tasks = await api.fetch_tasks(platform, limit=TASKS_PER_POLL)
+                
+                if not tasks:
+                    consecutive_errors = 0  # Reset nếu API trả về OK (dù rỗng)
+                    console.print("  [yellow]📭 Không có nhiệm vụ nào đang chờ.[/yellow]")
+                    if once:
+                        break
+                    console.print(f"  ⏳ Chờ {POLL_INTERVAL}s rồi thử lại...")
+                    await asyncio.sleep(POLL_INTERVAL)
+                    continue
+                
+                consecutive_errors = 0
+                console.print(f"  ✅ Nhận được [bold]{len(tasks)}[/bold] nhiệm vụ!")
+                display_tasks_table(tasks)
+                
+                # Phân bổ tasks cho workers
+                if workers == 1 or len(tasks) <= 1:
+                    # Chạy tuần tự
+                    result = await run_worker(tasks, api, headless, dry_run)
+                    total_success += result["success"]
+                    total_failed += result["failed"]
+                else:
+                    # Chia tasks cho nhiều workers
+                    chunks = [[] for _ in range(min(workers, len(tasks)))]
+                    for i, task in enumerate(tasks):
+                        chunks[i % len(chunks)].append(task)
+                    
+                    # Chạy song song
+                    worker_tasks = [
+                        run_worker(chunk, api, headless, dry_run)
+                        for chunk in chunks if chunk
+                    ]
+                    results = await asyncio.gather(*worker_tasks, return_exceptions=True)
+                    
+                    for r in results:
+                        if isinstance(r, Exception):
+                            console.print(f"  [red]❌ Worker exception: {r}[/red]")
+                            total_failed += 1
+                        else:
+                            total_success += r["success"]
+                            total_failed += r["failed"]
+                
+                # Hiển thị tổng kết
+                console.print(f"\n  📊 [bold]Tổng kết:[/bold] ✅ {total_success} thành công | ❌ {total_failed} thất bại")
+                
+                if once:
+                    break
+                
+                # Delay giữa các lần poll
+                delay = random.uniform(ACCOUNT_DELAY_MIN, ACCOUNT_DELAY_MAX)
+                console.print(f"  ⏳ Chờ {delay:.0f}s trước lần poll tiếp theo...")
+                await asyncio.sleep(delay)
+                
+            except Exception as e:
+                consecutive_errors += 1
+                console.print(f"\n  [red]❌ Lỗi vòng lặp poll #{poll_count}: {e}[/red]")
+                traceback.print_exc()
+                
+                if once:
+                    break
+                
+                # Exponential backoff: 30s, 60s, 120s, max 300s
+                backoff = min(30 * (2 ** (consecutive_errors - 1)), 300)
+                console.print(f"  ⏳ Backoff {backoff}s trước khi thử lại (lỗi liên tiếp: {consecutive_errors})...")
+                await asyncio.sleep(backoff)
+                
+                # Nếu lỗi liên tiếp quá nhiều, thoát
+                if consecutive_errors >= 10:
+                    console.print(f"  [red]💀 Quá nhiều lỗi liên tiếp ({consecutive_errors}), dừng tool.[/red]")
+                    break
+    finally:
+        await api.close()
     
     console.print(f"\n[bold green]🏁 Hoàn tất! Tổng: ✅ {total_success} thành công | ❌ {total_failed} thất bại[/bold green]\n")
 

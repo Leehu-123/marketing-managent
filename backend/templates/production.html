@@ -29,8 +29,11 @@ function productionPage() {
     deleting: false,
     reverting: false,
     slotGenerating: {},
+    slotUploading: {},
     restoredImageSlots: [],
     slotPromptTranslations: {},
+    currentUploadSlot: null,
+    replaceInlineImageIndex: null,
     
     // Character counters warnings
     metaTitleLimit: 60,
@@ -124,6 +127,16 @@ function productionPage() {
             window.showToast('Không thể tải chi tiết bài viết', 'error');
         }
     },
+    
+    getPostField(field) {
+        if (!this.selectedPost) return '';
+        return this.selectedPost[field] || '';
+    },
+    
+    setPostField(field, value) {
+        if (!this.selectedPost) return;
+        this.selectedPost[field] = value;
+    },
 
     async savePost(silent) {
         if (!this.selectedPost) return;
@@ -177,10 +190,17 @@ function productionPage() {
 
     async approvePost() {
         if (!this.selectedPost) return;
-        if (!confirm('Bạn có chắc duyệt bài viết này để đưa vào hàng đợi tự động xuất bản theo lịch đăng?')) return;
+        let msg = 'Bạn có chắc duyệt bài viết này để đưa vào hàng đợi tự động xuất bản theo lịch đăng?';
+        if (this.selectedPost.platform === 'Web') {
+            msg = 'Bạn có chắc duyệt bài viết này (bao gồm cả 3 ngôn ngữ) để đưa vào hàng đợi tự động xuất bản lên Website theo lịch đăng?';
+        } else if (this.selectedPost.platform === 'Fanpage') {
+            msg = 'Bạn có chắc duyệt bài viết này để đưa vào hàng đợi tự động xuất bản lên Fanpage theo lịch đăng?';
+        }
+        if (!confirm(msg)) return;
         
         this.approving = true;
         try {
+            await this.savePost(true); // Lưu trước khi duyệt
             const res = await fetch(`/api/v1/posts/${this.selectedPost.id}/approve`, {
                 method: 'POST'
             });
@@ -202,10 +222,17 @@ function productionPage() {
 
     async publishNow() {
         if (!this.selectedPost) return;
-        if (!confirm('Bạn có chắc chắn muốn xuất bản bài viết này ngay lập tức?')) return;
+        let msg = 'Bạn có chắc chắn muốn xuất bản bài viết này ngay lập tức?';
+        if (this.selectedPost.platform === 'Web') {
+            msg = 'Bạn có chắc chắn muốn xuất bản bài viết này (bao gồm cả 3 ngôn ngữ) lên Website ngay lập tức?';
+        } else if (this.selectedPost.platform === 'Fanpage') {
+            msg = 'Bạn có chắc chắn muốn xuất bản bài viết này lên Fanpage ngay lập tức?';
+        }
+        if (!confirm(msg)) return;
         
         this.publishing = true;
         try {
+            await this.savePost(true); // Lưu trước khi xuất bản
             const res = await fetch(`/api/v1/posts/${this.selectedPost.id}/publish`, {
                 method: 'POST'
             });
@@ -409,6 +436,67 @@ function productionPage() {
         }
     },
     
+    async uploadSlotImage(event, slot_index) {
+        const file = event.target.files[0];
+        if (!file) return;
+        
+        const validExts = ['.png', '.jpg', '.jpeg', '.webp', '.gif'];
+        const ext = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
+        if (!validExts.includes(ext)) {
+            window.showToast('Chỉ hỗ trợ .png, .jpg, .jpeg, .webp, .gif', 'warning');
+            return;
+        }
+        
+        this.slotUploading = { ...this.slotUploading, [slot_index]: true };
+        try {
+            const formData = new FormData();
+            formData.append('file', file);
+            
+            const res = await fetch(`/api/v1/posts/${this.selectedPost.id}/upload-inline-image`, {
+                method: 'POST',
+                body: formData
+            });
+            
+            if (!res.ok) throw new Error('Upload thất bại');
+            const data = await res.json();
+            
+            // Replace placeholder in frontend
+            if (data.url) {
+                const cap = document.getElementById('slot-caption-' + slot_index);
+                const captionText = cap ? cap.value : '';
+                const placeholderRegex = new RegExp('\x3C!--\\s*IMAGE_SLOT_' + slot_index + '\\s*--\x3E', 'g');
+                const prompt_placeholder_regex = new RegExp('\x3C!--\\s*IMAGE_SLOT_PROMPT_' + slot_index + ':[\\s\\S]*?--\x3E', 'g');
+                
+                const safeAlt = this.escapeAttr(captionText.substring(0, 80));
+                const safeFig = this.escapeHtml(captionText.substring(0, 140));
+                const safeCaptionAttr = this.escapeAttr(captionText.substring(0, 140));
+                // For manual upload, prompt is empty
+                const img_tag = '\x3Cfigure class=\'inline-img-wrapper\' data-slot=\'' + slot_index + '\' data-prompt=\'\' data-caption=\'' + safeCaptionAttr + '\'\x3E' +
+                    '\x3Cimg src=\'' + data.url + '\' alt=\'' + safeAlt + '\' class=\'inline-img\'\x3E' +
+                    (captionText ? '\x3Cfigcaption\x3E' + safeFig + '\x3C/figcaption\x3E' : '') + '\x3C/figure\x3E';
+                
+                let newBody = this.selectedPost.body.replace(placeholderRegex, img_tag);
+                newBody = newBody.replace(prompt_placeholder_regex, '');
+                
+                this.selectedPost.body = newBody;
+                this.restoredImageSlots = (this.restoredImageSlots || []).filter(slot => slot.index !== slot_index);
+                
+                if (window.tinymce && tinymce.activeEditor) {
+                    tinymce.activeEditor.setContent(newBody);
+                }
+            }
+            
+            await this.savePost(true);
+            window.showToast(`Đã upload ảnh cho vị trí #${slot_index}`, 'success');
+        } catch (err) {
+            console.error('Slot upload error:', err);
+            window.showToast('Không thể upload ảnh', 'error');
+        } finally {
+            this.slotUploading = { ...this.slotUploading, [slot_index]: false };
+            event.target.value = ''; // reset input
+        }
+    },
+    
     getParsedMediaUrls() {
         if (!this.selectedPost || !this.selectedPost.media_urls) return [];
         try {
@@ -460,6 +548,58 @@ function productionPage() {
         window.showToast('Đã xóa ảnh inline khỏi bài viết. Ô prompt tạo lại ảnh đã được mở lại.', 'success');
     },
 
+    async replaceInlineImage(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+        
+        const idx = this.replaceInlineImageIndex;
+        if (idx === null || idx === undefined) return;
+        
+        const images = this.getInlineImages();
+        const img = images[idx];
+        if (!img) return;
+        
+        const validExts = ['.png', '.jpg', '.jpeg', '.webp', '.gif'];
+        const ext = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
+        if (!validExts.includes(ext)) {
+            window.showToast('Chỉ hỗ trợ .png, .jpg, .jpeg, .webp, .gif', 'warning');
+            return;
+        }
+        
+        try {
+            const formData = new FormData();
+            formData.append('file', file);
+            
+            const res = await fetch(`/api/v1/posts/${this.selectedPost.id}/upload-inline-image`, {
+                method: 'POST',
+                body: formData
+            });
+            
+            if (!res.ok) throw new Error('Upload thất bại');
+            const data = await res.json();
+            
+            if (data.url) {
+                // Replace only the src in the existing figure tag
+                const oldHtml = img.html;
+                const newHtml = oldHtml.replace(/src=['"][^'"]+['"]/i, `src='${data.url}'`);
+                this.selectedPost.body = this.selectedPost.body.replace(oldHtml, newHtml);
+                
+                if (window.tinymce && tinymce.activeEditor) {
+                    tinymce.activeEditor.setContent(this.selectedPost.body);
+                }
+                
+                await this.savePost(true);
+                window.showToast('Đã thay thế ảnh thành công!', 'success');
+            }
+        } catch (err) {
+            console.error('Replace inline image error:', err);
+            window.showToast('Không thể thay thế ảnh', 'error');
+        } finally {
+            event.target.value = '';
+            this.replaceInlineImageIndex = null;
+        }
+    },
+
     getAttrFromHtml(html, attr) {
         const m = (html || '').match(new RegExp(attr + "=['\\\"]([^'\\\"]+)['\\\"]", 'i'));
         return m ? this.decodeHtmlEntities(m[1]) : '';
@@ -488,23 +628,14 @@ function productionPage() {
     async ensureEnglishSlotPrompt(slot) {
         if (!slot || !slot.caption || !slot.cacheKey) return;
         if (this.slotPromptTranslations[slot.cacheKey]) return;
-        try {
-            const res = await fetch('/api/v1/image-gen/translate-slot-prompt', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ caption: slot.caption, title: this.selectedPost ? this.selectedPost.title : '' })
-            });
-            if (!res.ok) return;
-            const data = await res.json();
-            if (data.prompt) {
-                this.slotPromptTranslations = { ...this.slotPromptTranslations, [slot.cacheKey]: data.prompt };
-                await this.$nextTick();
-                const txt = document.getElementById('slot-prompt-' + slot.index);
-                if (txt && (!txt.value || txt.value === slot.prompt)) txt.value = data.prompt;
-            }
-        } catch (err) {
-            console.warn('Translate slot prompt failed:', err);
-        }
+        
+        // Prevent burning AI quota automatically. Just use the built-in English fallback template.
+        const fallbackPrompt = this.buildEnglishImagePrompt(slot.caption);
+        this.slotPromptTranslations = { ...this.slotPromptTranslations, [slot.cacheKey]: fallbackPrompt };
+        
+        await this.$nextTick();
+        const txt = document.getElementById('slot-prompt-' + slot.index);
+        if (txt && (!txt.value || txt.value === slot.prompt)) txt.value = fallbackPrompt;
     },
 
     openInlineImage(url) {
@@ -876,7 +1007,7 @@ function productionPage() {
                     <!-- Tiêu đề bài viết -->
                     <div class="form-group">
                         <label class="form-label" for="post-title">Tiêu đề bài đăng</label>
-                        <input type="text" id="post-title" class="form-input text-base" x-model="selectedPost.title">
+                        <input type="text" id="post-title" class="form-input text-base" :value="getPostField('title')" @input="setPostField('title', $event.target.value)">
                     </div>
 
                     <!-- NỀN TẢNG: WEB (SEO) -->
@@ -887,10 +1018,10 @@ function productionPage() {
                                 <div class="flex justify-between items-center mb-1">
                                     <label class="form-label" for="meta-title">Meta Title</label>
                                     <span class="char-counter text-[10px]"
-                                          :class="selectedPost.meta_title?.length > metaTitleLimit ? 'danger text-red-500 font-bold' : selectedPost.meta_title?.length > 50 ? 'warning text-amber-500 font-semibold' : ''"
-                                          x-text="`${selectedPost.meta_title?.length || 0}/${metaTitleLimit}`"></span>
+                                          :class="getPostField('meta_title').length > metaTitleLimit ? 'danger text-red-500 font-bold' : getPostField('meta_title').length > 50 ? 'warning text-amber-500 font-semibold' : ''"
+                                          x-text="`${getPostField('meta_title').length}/${metaTitleLimit}`"></span>
                                 </div>
-                                <input type="text" id="meta-title" class="form-input" placeholder="Nhập meta title..." x-model="selectedPost.meta_title">
+                                <input type="text" id="meta-title" class="form-input" placeholder="Nhập meta title..." :value="getPostField('meta_title')" @input="setPostField('meta_title', $event.target.value)">
                             </div>
 
                             <!-- Meta Description & Counter -->
@@ -898,10 +1029,10 @@ function productionPage() {
                                 <div class="flex justify-between items-center mb-1">
                                     <label class="form-label" for="meta-desc">Meta Description</label>
                                     <span class="char-counter text-[10px]"
-                                          :class="selectedPost.meta_description?.length > metaDescLimit ? 'danger text-red-500 font-bold' : selectedPost.meta_description?.length > 140 ? 'warning text-amber-500 font-semibold' : ''"
-                                          x-text="`${selectedPost.meta_description?.length || 0}/${metaDescLimit}`"></span>
+                                          :class="getPostField('meta_description').length > metaDescLimit ? 'danger text-red-500 font-bold' : getPostField('meta_description').length > 140 ? 'warning text-amber-500 font-semibold' : ''"
+                                          x-text="`${getPostField('meta_description').length}/${metaDescLimit}`"></span>
                                 </div>
-                                <textarea id="meta-desc" class="form-input min-h-[60px]" placeholder="Nhập mô tả chuẩn SEO..." x-model="selectedPost.meta_description"></textarea>
+                                <textarea id="meta-desc" class="form-input min-h-[60px]" placeholder="Nhập mô tả chuẩn SEO..." :value="getPostField('meta_description')" @input="setPostField('meta_description', $event.target.value)"></textarea>
                             </div>
 
                             <!-- Headings Structure Display -->
@@ -950,9 +1081,11 @@ function productionPage() {
                             
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-4 items-center mt-2">
                                 <!-- Upload Area -->
-                                <div class="relative flex flex-col items-center justify-center p-6 border-2 border-dashed border-white/[0.08] hover:border-teal-500/40 rounded-xl bg-white/[0.01] hover:bg-white/[0.02] transition-all duration-300 group cursor-pointer">
-                                    <input type="file" multiple
-                                           class="absolute inset-0 opacity-0 cursor-pointer"
+                                <div class="relative flex flex-col items-center justify-center p-6 border-2 border-dashed border-white/[0.08] hover:border-teal-500/40 rounded-xl bg-white/[0.01] hover:bg-white/[0.02] transition-all duration-300 group cursor-pointer"
+                                     @click="if(!uploading) document.getElementById('mainMediaInput').click()">
+                                    <input type="file" id="mainMediaInput" multiple
+                                           class="sr-only"
+                                           accept=".mp4,.png,.jpg,.jpeg,.webp"
                                            @change="uploadMedia($event)"
                                            :disabled="uploading">
                                     
@@ -1092,12 +1225,13 @@ function productionPage() {
                         <template x-if="true">
                             <div class="flex items-center gap-2 mb-2 p-2 rounded-lg bg-white/[0.02] border border-white/[0.04]">
                                 <span class="text-[10px] text-slate-500 mr-1">Toolbar:</span>
-                                <label class="btn btn-secondary text-[10px] py-1 px-2 flex items-center gap-1 cursor-pointer relative" 
+                                <button type="button" class="btn btn-secondary text-[10px] py-1 px-2 flex items-center gap-1" 
+                                       @click="document.getElementById('toolbarInlineInput').click()"
+                                       :disabled="inlineUploading"
                                        :class="inlineUploading ? 'opacity-50' : ''">
-                                    <input type="file" class="absolute inset-0 opacity-0 w-full h-full cursor-pointer" 
+                                    <input type="file" id="toolbarInlineInput" class="sr-only" 
                                            accept=".png,.jpg,.jpeg,.webp,.gif"
-                                           @change="uploadInlineImage($event)" 
-                                           :disabled="inlineUploading">
+                                           @change="uploadInlineImage($event)">
                                     <template x-if="inlineUploading">
                                         <div class="w-3 h-3 border-2 border-slate-700 border-t-white rounded-full animate-spin"></div>
                                     </template>
@@ -1105,14 +1239,15 @@ function productionPage() {
                                         <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
                                     </template>
                                     <span x-text="inlineUploading ? 'Đang tải...' : '🖼 Chèn ảnh minh họa'"></span>
-                                </label>
+                                </button>
                                 <span class="text-[9px] text-slate-600">Ảnh sẽ được chèn vào cuối nội dung</span>
                             </div>
                         </template>
                         
                         <textarea id="post-body" class="form-input min-h-[260px] font-mono text-sm leading-relaxed" 
                                   placeholder="Nhập nội dung bài viết..." 
-                                  x-model="selectedPost.body"></textarea>
+                                  :value="getPostField('body')"
+                                  @input="setPostField('body', $event.target.value)"></textarea>
                     </div>
 
                     <!-- Image Slots UI -->
@@ -1126,13 +1261,24 @@ function productionPage() {
                                 <div class="p-3 rounded-lg bg-white/[0.02] border border-white/[0.05] space-y-2" x-init="ensureEnglishSlotPrompt(slot)">
                                     <div class="flex items-center justify-between">
                                         <span class="text-xs font-semibold text-emerald-300" x-text="'📍 Vị trí #' + slot.index"></span>
-                                        <button type="button" class="btn text-[10px] py-1 px-2 flex items-center gap-1 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white border-0"
-                                                @click.prevent="generateSlotImage(slot.index)">
-                                            <template x-if="slotGenerating[slot.index]">
-                                                <div class="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                                            </template>
-                                            <span x-text="slotGenerating[slot.index] ? 'Đang tạo...' : '🎨 Generate ảnh'"></span>
-                                        </button>
+                                        <div class="flex items-center gap-2">
+                                            <button type="button" class="btn text-[10px] py-1 px-2 flex items-center gap-1 bg-slate-700 hover:bg-slate-600 text-white border-0"
+                                                    @click="currentUploadSlot = slot.index; document.getElementById('globalSlotUploadInput').click()"
+                                                    :disabled="slotUploading[slot.index] === true">
+                                                <template x-if="slotUploading[slot.index]">
+                                                    <div class="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                                                </template>
+                                                <span x-text="slotUploading[slot.index] ? 'Đang tải...' : '⬆️ Tải ảnh lên'"></span>
+                                            </button>
+                                            <button type="button" class="btn text-[10px] py-1 px-2 flex items-center gap-1 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white border-0"
+                                                    @click.prevent="generateSlotImage(slot.index)"
+                                                    :disabled="slotGenerating[slot.index] === true">
+                                                <template x-if="slotGenerating[slot.index]">
+                                                    <div class="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                                                </template>
+                                                <span x-text="slotGenerating[slot.index] ? 'Đang tạo...' : '🎨 Generate ảnh'"></span>
+                                            </button>
+                                        </div>
                                     </div>
                                     <div class="space-y-1">
                                         <label class="text-[10px] text-slate-400 font-semibold uppercase">Prompt tạo ảnh (English - gửi cho AI)</label>
@@ -1169,8 +1315,12 @@ function productionPage() {
                                         <div class="p-2 space-y-2">
                                             <div class="text-[10px] text-slate-300 line-clamp-2" x-text="img.savedCaption || img.caption || 'Ảnh minh họa'"></div>
                                             <div class="text-[9px] text-slate-500 line-clamp-2" x-text="img.prompt ? 'AI prompt: ' + img.prompt : ''"></div>
-                                            <div class="flex items-center gap-2">
+                                            <div class="flex items-center gap-2 flex-wrap">
                                                 <button type="button" class="btn btn-secondary text-[10px] py-1 px-2" @click="openInlineImage(img.url)">Xem ảnh lớn</button>
+                                                <button type="button" class="btn text-[10px] py-1 px-2 bg-slate-700 hover:bg-slate-600 text-white border-0"
+                                                        @click="currentUploadSlot = img.slot || (idx + 1); replaceInlineImageIndex = idx; document.getElementById('replaceInlineImageInput').click()">
+                                                    ⬆️ Upload ảnh mới
+                                                </button>
                                                 <button type="button" class="btn text-[10px] py-1 px-2 bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20" @click="removeInlineImage(idx)">Xóa / tạo lại</button>
                                             </div>
                                         </div>
@@ -1234,14 +1384,14 @@ function productionPage() {
                                     <span class="truncate">blog</span>
                                 </div>
                                 <h4 class="text-xl text-[#8ab4f8] hover:underline cursor-pointer font-medium font-sans leading-tight leading-snug"
-                                    x-text="selectedPost.meta_title || selectedPost.title"></h4>
+                                    x-text="getPostField('meta_title') || getPostField('title')"></h4>
                                 <p class="text-sm text-slate-300 font-sans leading-normal"
-                                   x-text="selectedPost.meta_description || 'Vui lòng điền meta description để hiển thị preview chuẩn xác trên Google search snippet...'"></p>
+                                   x-text="getPostField('meta_description') || 'Vui lòng điền meta description để hiển thị preview chuẩn xác trên Google search snippet...'"></p>
                             </div>
 
                             <!-- Styled Web Page Body Preview -->
                             <div class="p-6 rounded-xl bg-[#1a1a2e] border border-white/[0.04]">
-                                <h1 class="text-3xl font-heading font-bold text-white mb-6" x-text="selectedPost.title"></h1>
+                                <h1 class="text-3xl font-heading font-bold text-white mb-6" x-text="getPostField('title')"></h1>
                                 
                                 <template x-if="getParsedMediaUrls().length > 0">
                                     <div class="mb-6 rounded-lg overflow-hidden border border-white/[0.05]">
@@ -1256,7 +1406,7 @@ function productionPage() {
                                     </div>
                                 </template>
 
-                                <div class="prose prose-invert max-w-none text-slate-300 space-y-4" x-html="selectedPost.body || '<p class=\'italic text-slate-600\'>Nội dung bài viết trống.</p>'"></div>
+                                <div class="prose prose-invert max-w-none text-slate-300 space-y-4" x-html="getPostField('body') || '<p class=\'italic text-slate-600\'>Nội dung bài viết trống.</p>'"></div>
                             </div>
                         </div>
                     </template>
@@ -1378,7 +1528,11 @@ function productionPage() {
 
             </div>
         </template>
-
+        
+        <!-- Global Input for Slot Uploads -->
+        <input type="file" id="globalSlotUploadInput" class="sr-only" accept=".png,.jpg,.jpeg,.webp,.gif" @change="uploadSlotImage($event, currentUploadSlot)">
+        <!-- Global Input for Replacing Inline Images -->
+        <input type="file" id="replaceInlineImageInput" class="sr-only" accept=".png,.jpg,.jpeg,.webp,.gif" @change="replaceInlineImage($event)">
     </div>
 
 </div>

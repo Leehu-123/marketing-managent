@@ -43,3 +43,22 @@ dump.txt
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+# Additional scratch & log files
+backend/uploads/post_*
+backend/uploads/inline_*
+backend/uploads/seeding/
+client_automation/*.txt
+client_automation/*.png
+backend/cleanup_*.py
+backend/diagnose_*.py
+backend/inspect_*.py
+backend/verify_*.py
+backend/read_log_*.py
+backend/run_*.py
+backend/do_reset_*.py
+backend/polylang-api-fix*
+backend/restart_dafa_container.py
+backend/compare_envs.py
+backend/create_plugin.py
+backend/search_tool_log.py
