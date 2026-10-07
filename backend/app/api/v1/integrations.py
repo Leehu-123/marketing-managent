@@ -8,7 +8,7 @@ from app import models, schemas
 
 router = APIRouter(prefix="/settings/integrations", tags=["Integration Settings"])
 
-DEFAULT_PLATFORMS = ["WordPress", "Fanpage", "GoogleAnalytics"]
+DEFAULT_PLATFORMS = ["WordPress", "Fanpage", "GoogleAnalytics", "YouTube"]
 
 @router.get("/", response_model=List[schemas.IntegrationSettingResponse])
 def get_integration_settings(db: Session = Depends(get_db)):
@@ -126,6 +126,92 @@ def google_auth_callback(req: Request, code: str, db: Session = Depends(get_db))
         db_setting.is_active = True
         db.commit()
         return RedirectResponse(url="/settings?success=google_connected")
+    except Exception as e:
+        return RedirectResponse(url=f"/settings?error={str(e)}")
+
+# --- YouTube OAuth Integration ---
+@router.post("/youtube/auth")
+def init_youtube_auth(req: Request, payload: dict, db: Session = Depends(get_db)):
+    client_id = payload.get("client_id")
+    client_secret = payload.get("client_secret")
+
+    if not client_id or not client_secret:
+        raise HTTPException(status_code=400, detail="Thiếu Client ID hoặc Client Secret")
+
+    db_setting = db.query(models.IntegrationSetting).filter(models.IntegrationSetting.platform == "YouTube").first()
+    if not db_setting:
+        db_setting = models.IntegrationSetting(platform="YouTube")
+        db.add(db_setting)
+
+    db_setting.username = client_id.strip()
+    db_setting.access_token = client_secret.strip()
+    db.commit()
+
+    scopes = [
+        "https://www.googleapis.com/auth/youtube.upload",
+        "https://www.googleapis.com/auth/youtube.readonly"
+    ]
+
+    base_url_str = str(req.base_url).rstrip("/")
+    if base_url_str.startswith("http://") and "localhost" not in base_url_str and "127.0.0.1" not in base_url_str:
+        import os
+        os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
+    else:
+        import os
+        os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
+
+    client_config = {
+        "web": {
+            "client_id": db_setting.username,
+            "client_secret": db_setting.access_token,
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+        }
+    }
+
+    try:
+        flow = google_auth_oauthlib.flow.Flow.from_client_config(client_config, scopes=scopes)
+        redirect_uri = base_url_str + "/api/v1/settings/integrations/youtube/callback"
+        flow.redirect_uri = redirect_uri
+
+        auth_url, _ = flow.authorization_url(access_type="offline", prompt="consent")
+        return {"auth_url": auth_url}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/youtube/callback")
+def youtube_auth_callback(req: Request, code: str, db: Session = Depends(get_db)):
+    db_setting = db.query(models.IntegrationSetting).filter(models.IntegrationSetting.platform == "YouTube").first()
+    if not db_setting or not db_setting.username or not db_setting.access_token:
+        return RedirectResponse(url="/settings?error=no_youtube_client_config")
+
+    client_config = {
+        "web": {
+            "client_id": db_setting.username,
+            "client_secret": db_setting.access_token,
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+        }
+    }
+
+    base_url_str = str(req.base_url).rstrip("/")
+
+    try:
+        flow = google_auth_oauthlib.flow.Flow.from_client_config(
+            client_config,
+            scopes=[
+                "https://www.googleapis.com/auth/youtube.upload",
+                "https://www.googleapis.com/auth/youtube.readonly"
+            ]
+        )
+        flow.redirect_uri = base_url_str + "/api/v1/settings/integrations/youtube/callback"
+        flow.fetch_token(code=code)
+
+        credentials = flow.credentials
+        db_setting.refresh_token = credentials.refresh_token
+        db_setting.is_active = True
+        db.commit()
+        return RedirectResponse(url="/settings?success=youtube_connected")
     except Exception as e:
         return RedirectResponse(url=f"/settings?error={str(e)}")
 

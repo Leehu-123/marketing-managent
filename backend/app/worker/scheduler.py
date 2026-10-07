@@ -146,28 +146,67 @@ async def _publish_due_videos():
         for dist in due_videos:
             logger.info(f"[SCHEDULER] Publishing VideoDistribution #{dist.id} to {dist.platform}")
             try:
-                # Use processed URL or fallback to source URL
                 video_url = dist.processed_video_url or (dist.video_content.source_video_url if dist.video_content else None)
                 if not video_url:
-                    raise Exception("No video URL found for distribution")
-                    
+                    raise Exception("Không tìm thấy đường dẫn video cho phân phối này")
+
+                channel = dist.channel
+                ch_token = channel.access_token if channel else None
+                ch_refresh = channel.refresh_token if channel else None
+                ch_id = channel.platform_channel_id if channel else None
+
+                plan_title = dist.video_content.video_plan.title if (dist.video_content and dist.video_content.video_plan) else "DAFA Glass Video"
+                video_title = dist.title or plan_title
+                video_desc = dist.caption or dist.description or ""
+
                 post_id = None
-                if dist.platform == "TikTok":
-                    post_id = TikTokService.upload_video(video_url, dist.caption)
+                post_url = None
+
+                if dist.platform == "Facebook":
+                    res = await MetaService.upload_video_to_facebook(
+                        file_path=video_url,
+                        title=video_title,
+                        description=video_desc,
+                        channel_token=ch_token,
+                        channel_page_id=ch_id
+                    )
+                    if not res.get("success"):
+                        raise Exception(res.get("error", "Lỗi upload Facebook Video"))
+                    post_id = res.get("post_id")
+                    post_url = res.get("url")
+
                 elif dist.platform == "YouTube":
-                    post_id = YouTubeService.upload_short(video_url, {"title": dist.title, "description": dist.description})
-                else: # Facebook
-                    post_id = f"fb_video_{dist.id}"
-                
+                    res = YouTubeService.upload_video_or_short(
+                        file_path=video_url,
+                        title=video_title,
+                        description=video_desc,
+                        is_short=(dist.post_type == "short"),
+                        channel_token=ch_token,
+                        channel_refresh=ch_refresh
+                    )
+                    if not res.get("success"):
+                        raise Exception(res.get("error", "Lỗi upload YouTube"))
+                    post_id = res.get("video_id")
+                    post_url = res.get("url")
+
+                elif dist.platform == "TikTok":
+                    post_id = TikTokService.upload_video(video_url, dist.caption or "")
+                    post_url = f"https://www.tiktok.com/@video/{post_id}"
+                else:
+                    raise Exception(f"Nền tảng {dist.platform} chưa được hỗ trợ")
+
                 dist.platform_post_id = post_id
+                dist.platform_post_url = post_url
                 dist.status = "Published"
                 dist.published_at = datetime.now()
+                dist.last_error = None
+                logger.info(f"[SCHEDULER] [OK] VideoDistribution #{dist.id} published: {post_url}")
             except Exception as e:
                 dist.status = "Failed"
                 dist.last_error = str(e)
                 dist.retry_count += 1
-                logger.error(f"[SCHEDULER] Failed to publish VideoDistribution #{dist.id}: {e}")
-            
+                logger.error(f"[SCHEDULER] [FAILED] VideoDistribution #{dist.id}: {e}")
+
             db.commit()
     except Exception as exc:
         logger.error(f"[SCHEDULER] Error in _publish_due_videos: {exc}")

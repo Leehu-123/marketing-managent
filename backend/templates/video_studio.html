@@ -28,6 +28,8 @@
                         <option value="Tất cả">Tất cả</option>
                         <option value="InProduction">Đang sản xuất</option>
                         <option value="ReadyToPublish">Sẵn sàng xuất bản</option>
+                        <option value="Scheduled">Đã lên lịch</option>
+                        <option value="Published">Đã xuất bản</option>
                     </select>
                 </div>
                 <div>
@@ -244,20 +246,36 @@
 
                 <!-- Admin Action -->
                 <div class="w-full mt-8 space-y-3 shrink-0">
+                    <template x-if="selectedVideo && selectedVideo.postUrl">
+                        <div class="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-xs text-emerald-400 flex items-center justify-between shadow-lg">
+                            <span class="flex items-center gap-1.5 font-bold">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+                                Đã xuất bản lên kênh
+                            </span>
+                            <a :href="selectedVideo.postUrl" target="_blank" class="underline font-bold text-white hover:text-emerald-300">Xem video trên kênh &rarr;</a>
+                        </div>
+                    </template>
+
                     <div class="mb-4">
-                        <label class="block text-xs font-bold text-gray-400 mb-2 uppercase tracking-widest">Lịch Đăng (Scheduled Date)</label>
+                        <label class="block text-xs font-bold text-gray-400 mb-2 uppercase tracking-widest">Lịch Đăng Tự Động (Tùy chọn)</label>
                         <input type="datetime-local" x-model="scheduledDate" class="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-orange-500 outline-none transition-all shadow-inner font-mono text-sm [color-scheme:dark]" @click="$el.showPicker && $el.showPicker()">
                     </div>
 
-                    <button @click="approvePublish()" class="w-full py-4 bg-gradient-to-r from-orange-500 to-rose-600 hover:from-orange-400 hover:to-rose-500 text-white font-black text-lg rounded-2xl shadow-[0_0_20px_rgba(249,115,22,0.4)] transition-all flex justify-center items-center space-x-2 transform hover:-translate-y-1">
-                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                        <span>Duyệt xuất bản</span>
+                    <!-- Nút Đăng Ngay -->
+                    <button @click="publishNow()" :disabled="isPublishing" class="w-full py-4 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white font-black text-lg rounded-2xl shadow-[0_0_20px_rgba(16,185,129,0.35)] transition-all flex justify-center items-center space-x-2 transform hover:-translate-y-1 disabled:opacity-50">
+                        <svg x-show="!isPublishing" class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"></path></svg>
+                        <svg x-show="isPublishing" class="w-6 h-6 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
+                        <span x-text="isPublishing ? 'Đang kết nối API & tải video lên kênh...' : '🚀 Đăng Ngay Lên Kênh'"></span>
                     </button>
-                    <button class="w-full py-3 bg-white/5 hover:bg-white/10 text-gray-300 font-bold rounded-2xl transition-all border border-white/5">
-                        Lưu bản nháp
+
+                    <!-- Nút Lên Lịch Đăng -->
+                    <button @click="schedulePublish()" :disabled="isScheduling" class="w-full py-3.5 bg-gradient-to-r from-orange-500 to-rose-600 hover:from-orange-400 hover:to-rose-500 text-white font-bold text-base rounded-2xl shadow-[0_0_20px_rgba(249,115,22,0.3)] transition-all flex justify-center items-center space-x-2 disabled:opacity-50">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+                        <span x-text="isScheduling ? 'Đang xử lý...' : '📅 Lưu & Lên Lịch Đăng'"></span>
                     </button>
-                    <button @click="deleteVideo()" class="w-full py-3 bg-red-500/10 hover:bg-red-500/20 text-red-400 font-bold rounded-2xl transition-all border border-red-500/20 flex items-center justify-center space-x-2">
-                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+
+                    <button @click="deleteVideo()" class="w-full py-2.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 font-bold text-sm rounded-2xl transition-all border border-red-500/20 flex items-center justify-center space-x-2">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
                         <span>Xóa Video</span>
                     </button>
                 </div>
@@ -289,6 +307,8 @@ function videoStudioData() {
         filterStatus: 'Tất cả',
         filterTime: '',
         scheduledDate: '',
+        isPublishing: false,
+        isScheduling: false,
         videos: [],
         allChannels: [],
         campaignIdMap: {},
@@ -322,7 +342,7 @@ function videoStudioData() {
                 const res = await fetch('/api/v1/video-plans/', { headers: { "Authorization": "Bearer " + localStorage.getItem("token") } });
                 if(res.ok) {
                     const data = await res.json();
-                    this.videos = data.filter(p => p.status === 'ReadyToPublish' || p.status === 'InProduction').map(p => {
+                    this.videos = data.filter(p => ['ReadyToPublish', 'InProduction', 'Scheduled', 'Published'].includes(p.status)).map(p => {
                         let plats = [];
                         try { plats = JSON.parse(p.target_platforms || '[]'); } catch(e){}
                         let cName = this.allChannels.find(c => c.id === p.channel_id)?.name || 'Chưa phân bổ';
@@ -487,15 +507,88 @@ function videoStudioData() {
                 this.caption = '';
             }
         },
-        async approvePublish() {
+        async publishNow() {
             if(!this.selectedVideo) return;
+            if(!this.publishChannel) {
+                window.showToast?.('Vui lòng chọn Kênh đăng tải!', 'warning');
+                return;
+            }
+            if(!confirm("Bạn có chắc chắn muốn ĐĂNG NGAY video này lên kênh đã chọn không?")) return;
+
+            this.isPublishing = true;
+            window.showToast?.('Đang kết nối API và tải video lên kênh...', 'info');
+            try {
+                const res = await fetch(`/api/v1/video-contents/plan/${this.selectedVideo.id}/publish-or-schedule`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer ' + localStorage.getItem('token')
+                    },
+                    body: JSON.stringify({
+                        channel_id: parseInt(this.publishChannel),
+                        caption: this.caption,
+                        publish_now: true
+                    })
+                });
+                const data = await res.json();
+                if (res.ok) {
+                    this.selectedVideo.status = 'Published';
+                    this.selectedVideo.postUrl = data.url;
+                    window.showToast?.(data.message || 'Đăng video thành công!', 'success');
+                    await this.loadData();
+                } else {
+                    window.showToast?.('Lỗi: ' + (data.detail || 'Không thể đăng video'), 'error');
+                }
+            } catch (err) {
+                console.error(err);
+                window.showToast?.('Lỗi kết nối máy chủ: ' + err.message, 'error');
+            } finally {
+                this.isPublishing = false;
+            }
+        },
+        async schedulePublish() {
+            if(!this.selectedVideo) return;
+            if(!this.publishChannel) {
+                window.showToast?.('Vui lòng chọn Kênh đăng tải!', 'warning');
+                return;
+            }
             if(!this.scheduledDate) {
                 window.showToast?.('Vui lòng chọn thời gian đăng (Lịch đăng)!', 'warning');
                 return;
             }
-            // Gọi API Update ...
-            this.selectedVideo.status = 'Đã lên lịch';
-            window.showToast?.('Đã lên lịch xuất bản!', 'success');
+
+            this.isScheduling = true;
+            try {
+                const res = await fetch(`/api/v1/video-contents/plan/${this.selectedVideo.id}/publish-or-schedule`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer ' + localStorage.getItem('token')
+                    },
+                    body: JSON.stringify({
+                        channel_id: parseInt(this.publishChannel),
+                        scheduled_at: this.scheduledDate,
+                        caption: this.caption,
+                        publish_now: false
+                    })
+                });
+                const data = await res.json();
+                if (res.ok) {
+                    this.selectedVideo.status = 'Scheduled';
+                    window.showToast?.(data.message || 'Đã lên lịch đăng video!', 'success');
+                    await this.loadData();
+                } else {
+                    window.showToast?.('Lỗi: ' + (data.detail || 'Không thể lên lịch'), 'error');
+                }
+            } catch (err) {
+                console.error(err);
+                window.showToast?.('Lỗi kết nối khi lên lịch: ' + err.message, 'error');
+            } finally {
+                this.isScheduling = false;
+            }
+        },
+        async approvePublish() {
+            await this.schedulePublish();
         },
         async deleteVideo() {
             if(!this.selectedVideo) return;

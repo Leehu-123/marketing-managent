@@ -477,3 +477,102 @@ class MetaService:
                 "comments": 0,
                 "error": f"Unexpected error: {str(exc)}",
             }
+
+    @staticmethod
+    async def upload_video_to_facebook(
+        file_path: str,
+        title: str,
+        description: str = "",
+        channel_token: Optional[str] = None,
+        channel_page_id: Optional[str] = None,
+    ) -> dict:
+        """
+        Upload video trực tiếp lên Facebook Fanpage qua Meta Graph API.
+        Hỗ trợ token riêng của VideoChannel hoặc token chung từ IntegrationSetting.
+        """
+        import os
+        from app.core.database import SessionLocal
+        from app.models.setting import IntegrationSetting
+        from app.services.youtube_service import resolve_local_video_path
+
+        # 1. Resolve Access Token & Page ID
+        db = SessionLocal()
+        page_id = channel_page_id
+        access_token = channel_token
+        try:
+            if not access_token or not page_id:
+                meta_setting = db.query(IntegrationSetting).filter(
+                    IntegrationSetting.platform == "Fanpage",
+                    IntegrationSetting.is_active == True
+                ).first()
+                if meta_setting:
+                    page_id = page_id or meta_setting.username or settings.META_PAGE_ID
+                    access_token = access_token or meta_setting.access_token or settings.META_PAGE_ACCESS_TOKEN
+                else:
+                    page_id = page_id or settings.META_PAGE_ID
+                    access_token = access_token or settings.META_PAGE_ACCESS_TOKEN
+        finally:
+            db.close()
+
+        if settings.MOCK_META:
+            fake_id = f"fb_video_{random.randint(100000000000, 999999999999)}"
+            logger.info(f"[MOCK META] Đã giả lập upload video Facebook: {title} -> {fake_id}")
+            return {
+                "success": True,
+                "post_id": fake_id,
+                "url": f"https://www.facebook.com/{fake_id}",
+                "is_mock": True,
+                "error": None
+            }
+
+        if not page_id or not access_token:
+            return {
+                "success": False,
+                "post_id": None,
+                "url": None,
+                "error": "Chưa cấu hình Meta Page ID hoặc Access Token cho Fanpage."
+            }
+
+        # 2. Tìm file video vật lý
+        resolved_file = resolve_local_video_path(file_path)
+        if not resolved_file or not os.path.exists(resolved_file):
+            return {
+                "success": False,
+                "post_id": None,
+                "url": None,
+                "error": f"Không tìm thấy file video tại: {file_path}"
+            }
+
+        # 3. Post lên Graph API /{page_id}/videos
+        endpoint = f"{META_GRAPH_API_BASE}/{page_id}/videos"
+        msg = f"{title}\n\n{description}" if description else title
+        payload = {
+            "title": title,
+            "description": msg,
+            "access_token": access_token
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=180.0) as client:
+                with open(resolved_file, "rb") as f:
+                    file_content = f.read()
+                files = {"source": ("video.mp4", file_content, "video/mp4")}
+                resp = await client.post(endpoint, data=payload, files=files)
+                resp.raise_for_status()
+                data = resp.json()
+                video_id = data.get("id") or data.get("post_id")
+                return {
+                    "success": True,
+                    "post_id": str(video_id),
+                    "url": f"https://www.facebook.com/{video_id}",
+                    "is_mock": False,
+                    "error": None
+                }
+        except httpx.HTTPStatusError as exc:
+            err = exc.response.text
+            logger.error(f"[META VIDEO] HTTP {exc.response.status_code}: {err}")
+            return {"success": False, "post_id": None, "url": None, "error": f"HTTP {exc.response.status_code}: {err}"}
+        except Exception as exc:
+            logger.error(f"[META VIDEO] Error: {exc}")
+            return {"success": False, "post_id": None, "url": None, "error": str(exc)}
+

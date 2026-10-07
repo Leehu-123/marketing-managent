@@ -220,3 +220,161 @@ def generate_caption(req: CaptionRequest):
         caption = f"Caption mặc định cho: {req.title}\n#dafaglass #video"
     return {"caption": caption}
 
+
+class PublishPlanRequest(BaseModel):
+    channel_id: Optional[int] = None
+    scheduled_at: Optional[str] = None
+    caption: Optional[str] = None
+    publish_now: bool = False
+
+
+@router.post("/plan/{plan_id}/publish-or-schedule")
+async def publish_or_schedule_plan(plan_id: int, req: PublishPlanRequest, db: Session = Depends(get_db)):
+    """Đăng ngay hoặc lên lịch đăng video liên kết với một Kế hoạch Video (VideoPlan)."""
+    from datetime import datetime
+    from app.models.video_channel import VideoChannel
+    from app.services.meta_service import MetaService
+    from app.services.youtube_service import YouTubeService
+    from app.services.tiktok_service import TikTokService
+
+    plan = db.query(VideoPlan).filter(VideoPlan.id == plan_id).first()
+    if not plan:
+        raise HTTPException(status_code=404, detail="Không tìm thấy kế hoạch video")
+
+    content = plan.video_content
+    if not content or not content.source_video_url:
+        raise HTTPException(status_code=400, detail="Video chưa được tải lên file. Vui lòng tải video trước khi xuất bản!")
+
+    # 1. Update VideoPlan metadata
+    if req.caption:
+        plan.saved_caption = req.caption
+    if req.channel_id:
+        plan.channel_id = req.channel_id
+    if req.scheduled_at:
+        try:
+            plan.optimal_post_time = datetime.fromisoformat(req.scheduled_at.replace("Z", ""))
+        except Exception:
+            pass
+
+    # 2. Resolve Channel & Platform
+    channel = None
+    if req.channel_id:
+        channel = db.query(VideoChannel).filter(VideoChannel.id == req.channel_id).first()
+    elif plan.channel_id:
+        channel = db.query(VideoChannel).filter(VideoChannel.id == plan.channel_id).first()
+
+    platform = channel.platform if channel else "Facebook"
+    video_url = content.source_video_url
+    caption_text = req.caption or plan.saved_caption or plan.title
+
+    # 3. Find or create VideoDistribution
+    dist = db.query(VideoDistribution).filter(
+        VideoDistribution.video_content_id == content.id,
+        VideoDistribution.platform == platform
+    ).first()
+
+    if not dist:
+        dist = VideoDistribution(
+            video_content_id=content.id,
+            channel_id=channel.id if channel else None,
+            platform=platform,
+            post_type="short",
+            title=plan.title,
+            caption=caption_text,
+            status="Pending"
+        )
+        db.add(dist)
+        db.flush()
+    else:
+        dist.channel_id = channel.id if channel else dist.channel_id
+        dist.title = plan.title
+        dist.caption = caption_text
+
+    ch_token = channel.access_token if channel else None
+    ch_refresh = channel.refresh_token if channel else None
+    ch_id = channel.platform_channel_id if channel else None
+
+    # 4. Execute Publish Now OR Schedule
+    if req.publish_now:
+        try:
+            post_id = None
+            post_url = None
+
+            if platform == "Facebook":
+                res = await MetaService.upload_video_to_facebook(
+                    file_path=video_url,
+                    title=plan.title,
+                    description=caption_text,
+                    channel_token=ch_token,
+                    channel_page_id=ch_id
+                )
+                if not res.get("success"):
+                    raise Exception(res.get("error", "Lỗi upload video Facebook"))
+                post_id = res.get("post_id")
+                post_url = res.get("url")
+
+            elif platform == "YouTube":
+                res = YouTubeService.upload_video_or_short(
+                    file_path=video_url,
+                    title=plan.title,
+                    description=caption_text,
+                    is_short=True,
+                    channel_token=ch_token,
+                    channel_refresh=ch_refresh
+                )
+                if not res.get("success"):
+                    raise Exception(res.get("error", "Lỗi upload video YouTube"))
+                post_id = res.get("video_id")
+                post_url = res.get("url")
+
+            elif platform == "TikTok":
+                post_id = TikTokService.upload_video(video_url, caption_text)
+                post_url = f"https://www.tiktok.com/@video/{post_id}"
+            else:
+                raise Exception(f"Nền tảng '{platform}' chưa được hỗ trợ.")
+
+            dist.platform_post_id = post_id
+            dist.platform_post_url = post_url
+            dist.status = "Published"
+            dist.published_at = datetime.utcnow()
+            dist.last_error = None
+            plan.status = "Published"
+            db.commit()
+
+            return {
+                "status": "published",
+                "platform": platform,
+                "post_id": post_id,
+                "url": post_url,
+                "message": f"Đã đăng video thành công lên {platform}!"
+            }
+
+        except Exception as e:
+            dist.status = "Failed"
+            dist.last_error = str(e)
+            db.commit()
+            raise HTTPException(status_code=500, detail=f"Lỗi đăng video: {str(e)}")
+
+    else:
+        # Lên lịch đăng
+        if not req.scheduled_at:
+            raise HTTPException(status_code=400, detail="Vui lòng chọn thời gian lên lịch đăng!")
+        try:
+            sched_dt = datetime.fromisoformat(req.scheduled_at.replace("Z", ""))
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Định dạng thời gian không hợp lệ: {e}")
+
+        dist.status = "Scheduled"
+        dist.scheduled_at = sched_dt
+        dist.last_error = None
+        plan.status = "Scheduled"
+        db.commit()
+
+        return {
+            "status": "scheduled",
+            "platform": platform,
+            "scheduled_at": str(sched_dt),
+            "message": f"Đã lên lịch đăng video lên {platform} vào lúc {sched_dt.strftime('%H:%M %d/%m/%Y')}!"
+        }
+
+
